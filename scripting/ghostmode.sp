@@ -164,12 +164,12 @@ public Action Command_Ghost(int iClient, int iArgc)
 	if (Cookie_Get(iClient))
 	{
 		Cookie_Set(iClient, "0");
-		PrintToChat(iClient, "\x07E17100[SM] Режим призрака выключ%s", IsClientInGhostMode(iClient) ? "ится при возрождении" : "ен");
+		PrintToChat(iClient, "\x07E17100[SM] Ghost mode %s", IsClientInGhostMode(iClient) ? "will be disabled after respawn" : "disabled");
 	}
 	else
 	{
 		Cookie_Set(iClient, "1");
-		PrintToChat(iClient, "\x07E19F00[SM] Режим призрака включен");
+		PrintToChat(iClient, "\x07E19F00[SM] Ghost mode enabled");
 
 		if (IsActiveRound() && !IsClientInGhostMode(iClient) && !IsPlayerAlive(iClient))
 		{
