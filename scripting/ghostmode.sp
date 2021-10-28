@@ -7,15 +7,15 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define TF_MAXPLAYERS 32
-#define MAX_BUTTONS 26
+#define TF_MAXPLAYERS		33
 
-#define COLOR_TF_RED		{ 159, 55, 34, 255 }
-#define COLOR_TF_BLUE		{ 76, 109, 129, 255 }
+#define GHOST_COLOR_RED		{ 159, 55, 34, 255 }
+#define GHOST_COLOR_BLUE	{ 76, 109, 129, 255 }
 
 #define GHOST_MODEL_RED 	"models/props_halloween/ghost_no_hat_red.mdl"
 #define GHOST_MODEL_BLUE	"models/props_halloween/ghost_no_hat.mdl"
-#define GHOST_SPEED 300.0
+
+#define GHOST_SPEED 		375.0 // -20% in TFCond_SwimmingNoEffects (300)
 
 enum
 {
@@ -25,16 +25,14 @@ enum
 }
 
 int g_iPlayerState[TF_MAXPLAYERS + 1];
-int g_iPlayerLastButtons[TF_MAXPLAYERS + 1];
 int g_iPlayerGhostTarget[TF_MAXPLAYERS + 1];
-
 Cookie g_hGhostCookie;
 
 public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.1",
+	version = "1.2",
 	url = "https://steamcommunity.com/id/jugheadq"
 };
 
@@ -50,12 +48,11 @@ public void OnPluginStart()
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_death", Event_PlayerDeath);
 
-	// Late load
+	GameData_Init();
+
 	for (int i = 1; i <= MaxClients; i++)
 		if (IsClientInGame(i))
 			OnClientPutInServer(i);
-
-	GameData_Init();
 }
 
 public void OnMapStart()
@@ -76,34 +73,6 @@ public void OnClientPutInServer(int iClient)
 	g_iPlayerState[iClient] = State_Ignore;
 	SDKHook(iClient, SDKHook_PreThink, Hook_PreThink);
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
-}
-
-public void TF2_OnConditionAdded(int iClient, TFCond cond)
-{
-	if (cond == TFCond_Taunting && IsClientInGhostMode(iClient))
-		TF2_RemoveCondition(iClient, TFCond_Taunting);
-}
-
-public Action OnPlayerRunCmd(int iClient, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
-{
-	if (!IsClientInGhostMode(iClient))
-		return;
-
-	int button;
-	for (int i = 0; i < MAX_BUTTONS; i++)
-	{
-		button = (1 << i);
-
-		if (buttons & button)
-		{
-			if (!(g_iPlayerLastButtons[iClient] & button))
-				Client_OnButtonPress(iClient, button);
-		}
-		else if (g_iPlayerLastButtons[iClient] & button)
-			Client_OnButtonRelease(iClient, button);
-	}
-
-	g_iPlayerLastButtons[iClient] = buttons;
 }
 
 public MRESReturn DHook_PassEntityFilter(DHookReturn ret, DHookParam params)
@@ -130,11 +99,7 @@ public MRESReturn DHook_PassEntityFilter(DHookReturn ret, DHookParam params)
 
 public void Hook_PreThink(int iClient)
 {
-	if (!IsClientInGhostMode(iClient))
-		return;
-
-	SetEntPropFloat(iClient, Prop_Send, "m_flMaxspeed", GHOST_SPEED);
-	if (GetEntProp(iClient, Prop_Send, "m_nForceTauntCam") == 1)
+	if (IsClientInGhostMode(iClient) && GetEntProp(iClient, Prop_Send, "m_nForceTauntCam") == 1)
 		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 }
 
@@ -198,7 +163,7 @@ public Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
 	return Plugin_Handled;
 }
 
-public Action Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcast)
+public void Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcast)
 {
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
@@ -207,7 +172,7 @@ public Action Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroa
 	Client_SetGhostMode(iClient, (IsActiveRound() && g_iPlayerState[iClient] == State_Ready) ? true : false);
 }
 
-public Action Event_PlayerDeath(Event hEvent, const char[] sName, bool bDontBroadcast)
+public void Event_PlayerDeath(Event hEvent, const char[] sName, bool bDontBroadcast)
 {
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
@@ -226,32 +191,29 @@ void Client_CancelGhostMode(int iClient)
 		return;
 
 	Client_SetGhostMode(iClient, false);
-
 	SetEntProp(iClient, Prop_Send, "m_lifeState", 0);
 	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
+
 	ForcePlayerSuicide(iClient);
 }
 
 void Client_SetGhostMode(int iClient, bool bState)
 {
 	g_iPlayerGhostTarget[iClient] = INVALID_ENT_REFERENCE;
+	g_iPlayerState[iClient] = bState ? State_Ghost : State_Ignore;
+	SetEntProp(iClient, Prop_Send, "m_CollisionGroup", bState ? 1 : 5);
 
 	if (bState)
 	{
-		g_iPlayerState[iClient] = State_Ghost;
-
-		SetEntProp(iClient, Prop_Send, "m_CollisionGroup", 1);
+		TF2_AddCondition(iClient, TFCond_SwimmingNoEffects);
 		SetEntProp(iClient, Prop_Send, "m_lifeState", 2);
 		SetEntProp(iClient, Prop_Send, "m_iHideHUD", 8);
-
-		// Set player class to spy to see enemy nicknames and health
-		SetEntProp(iClient, Prop_Send, "m_iClass", view_as<int>(TFClass_Spy));
-		TF2_RegeneratePlayer(iClient);
+		SetEntProp(iClient, Prop_Send, "m_iClass", view_as<int>(TFClass_Spy)); // allow see enemy health
 
 		SetVariantString(TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_MODEL_RED : GHOST_MODEL_BLUE);
 		AcceptEntityInput(iClient, "SetCustomModel");
 
-		int iColor[4]; iColor = TF2_GetClientTeam(iClient) == TFTeam_Red ? COLOR_TF_RED : COLOR_TF_BLUE;
+		int iColor[4]; iColor = TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_COLOR_RED : GHOST_COLOR_BLUE;
 		SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
 
 		Client_SetNextGhostTarget(iClient);
@@ -259,11 +221,6 @@ void Client_SetGhostMode(int iClient, bool bState)
 	}
 	else
 	{
-		g_iPlayerState[iClient] = State_Ignore;
-
-		SetEntProp(iClient, Prop_Send, "m_CollisionGroup", 5);
-		SetEntityGravity(iClient, 1.0);
-
 		SetVariantString("");
 		AcceptEntityInput(iClient, "SetCustomModel");
 		SetEntityRenderColor(iClient, 255, 255, 255, 255);
@@ -274,7 +231,7 @@ public Action Timer_PostGhostMode(Handle hTimer, any userid)
 {
 	int iClient = GetClientOfUserId(userid);
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !IsClientInGhostMode(iClient))
-		return;
+		return Plugin_Continue;
 
 	int iEntity = MaxClients + 1;
 	while ((iEntity = FindEntityByClassname(iEntity, "tf_wearable")) > MaxClients)
@@ -297,15 +254,17 @@ public Action Timer_PostGhostMode(Handle hTimer, any userid)
 			AcceptEntityInput(iEntity, "Kill");
 	}
 
-	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 	TF2_RemoveAllWeapons(iClient);
+	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
+	SetEntPropFloat(iClient, Prop_Send, "m_flMaxspeed", GHOST_SPEED);
+	return Plugin_Continue;
 }
 
 public Action Timer_Respawn(Handle hTimer, any userid)
 {
 	int iClient = GetClientOfUserId(userid);
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
-		return;
+		return Plugin_Continue;
 
 	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red)
 	{
@@ -314,6 +273,8 @@ public Action Timer_Respawn(Handle hTimer, any userid)
 	}
 	else
 		g_iPlayerState[iClient] = State_Ignore;
+
+	return Plugin_Continue;
 }
 
 void Client_SetNextGhostTarget(int iClient)
@@ -346,23 +307,6 @@ void Client_SetNextGhostTarget(int iClient)
 		GetClientEyeAngles(iTarget, flAng);
 		GetEntPropVector(iTarget, Prop_Data, "m_vecAbsVelocity", flVel);
 		TeleportEntity(iClient, flPos, flAng, flVel);
-	}
-}
-
-void Client_OnButtonPress(int iClient, int iButton)
-{
-	switch (iButton)
-	{
-		case IN_JUMP: SetEntityGravity(iClient, 0.0001);
-		case IN_DUCK: SetEntityGravity(iClient, 4.0);
-	}
-}
-
-void Client_OnButtonRelease(int iClient, int iButton)
-{
-	switch (iButton)
-	{
-		case IN_DUCK, IN_JUMP: SetEntityGravity(iClient, 0.5);
 	}
 }
 
