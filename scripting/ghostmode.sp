@@ -38,7 +38,7 @@ public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.2",
+	version = "1.3",
 	url = "https://steamcommunity.com/id/jugheadq"
 };
 
@@ -125,12 +125,7 @@ public Action Hook_SetTransmit(int iClient, int iOther)
 
 	// Transmit to non-ghost players with enabled cookie
 	if (!IsClientInGhostMode(iOther))
-	{
-		if (Cookie_Get(iOther, g_hSeeGhostCookie))
-			return Plugin_Continue;
-
-		return Plugin_Handled;
-	}
+		return Cookie_Get(iOther, g_hSeeGhostCookie) ? Plugin_Continue : Plugin_Handled;
 
 	return Plugin_Continue;
 }
@@ -246,8 +241,8 @@ public int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSele
 				Cookie_Set(iClient, g_hThirdPersonCookie, bValue);
 				Menu_DisplayMain(iClient);
 
-				if (bValue && IsClientInGhostMode(iClient))
-					SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
+				if (IsClientInGhostMode(iClient))
+					SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", bValue ? 2 : 0);
 			}
 		}
 		case MenuAction_End: delete hMenu;
