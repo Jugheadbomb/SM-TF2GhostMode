@@ -12,10 +12,11 @@
 #define GHOST_COLOR_RED		{ 159, 55, 34, 255 }
 #define GHOST_COLOR_BLUE	{ 76, 109, 129, 255 }
 
-#define GHOST_MODEL_RED 	"models/props_halloween/ghost_no_hat_red.mdl"
+#define GHOST_MODEL_RED		"models/props_halloween/ghost_no_hat_red.mdl"
 #define GHOST_MODEL_BLUE	"models/props_halloween/ghost_no_hat.mdl"
 
-#define GHOST_SPEED 		375.0 // -20% in TFCond_SwimmingNoEffects (300)
+#define GHOST_SPEED			375.0 // -20% in TFCond_SwimmingNoEffects (300)
+#define GHOST_PARTICLE		"ghost_appearation"
 
 enum
 {
@@ -26,7 +27,12 @@ enum
 
 int g_iPlayerState[TF_MAXPLAYERS + 1];
 int g_iPlayerGhostTarget[TF_MAXPLAYERS + 1];
-Cookie g_hGhostCookie;
+float g_flPlayerPos[TF_MAXPLAYERS + 1][3];
+float g_flPlayerAng[TF_MAXPLAYERS + 1][3];
+
+Cookie g_hBeGhostCookie;
+Cookie g_hSeeGhostCookie;
+Cookie g_hThirdPersonCookie;
 
 public Plugin myinfo =
 {
@@ -38,8 +44,12 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
-	g_hGhostCookie = new Cookie("ghostmode_preference", "", CookieAccess_Private);
-	RegConsoleCmd("sm_ghost", Command_Ghost, "Turn on/off ghostmode");
+	g_hBeGhostCookie = new Cookie("ghostmode_beghost", "", CookieAccess_Private);
+	g_hSeeGhostCookie = new Cookie("ghostmode_seeghost", "", CookieAccess_Private);
+	g_hThirdPersonCookie = new Cookie("ghostmode_thirdperson", "", CookieAccess_Private);
+
+	RegConsoleCmd("sm_ghost", Command_Ghost, "Open ghostmode main menu");
+	RegConsoleCmd("sm_ghostmode", Command_Ghost, "Open ghostmode main menu");
 
 	AddCommandListener(CL_Voicemenu, "voicemenu");
 	AddCommandListener(CL_Joinclass, "joinclass");
@@ -49,6 +59,7 @@ public void OnPluginStart()
 	HookEvent("player_death", Event_PlayerDeath);
 
 	GameData_Init();
+	LoadTranslations("ghostmode.phrases");
 
 	for (int i = 1; i <= MaxClients; i++)
 		if (IsClientInGame(i))
@@ -80,15 +91,15 @@ public MRESReturn DHook_PassEntityFilter(DHookReturn ret, DHookParam params)
 	if (params.IsNull(1) || params.IsNull(2))
 		return MRES_Ignored;
 
-	int iEntity1 = params.Get(1);
-	if (0 < iEntity1 <= MaxClients && IsClientInGhostMode(iEntity1))
+	int iEntity = params.Get(1);
+	if (0 < iEntity <= MaxClients && IsClientInGhostMode(iEntity))
 	{
 		ret.Value = false;
 		return MRES_Supercede;
 	}
 
-	int iEntity2 = params.Get(2);
-	if (0 < iEntity2 <= MaxClients && IsClientInGhostMode(iEntity2))
+	iEntity = params.Get(2);
+	if (0 < iEntity <= MaxClients && IsClientInGhostMode(iEntity))
 	{
 		ret.Value = false;
 		return MRES_Supercede;
@@ -105,13 +116,21 @@ public void Hook_PreThink(int iClient)
 
 public Action Hook_SetTransmit(int iClient, int iOther)
 {
+	if (!IsClientInGhostMode(iClient) || iOther == iClient)
+		return Plugin_Continue;
+
 	// Transmit on round end
 	if (GameRules_GetRoundState() == RoundState_TeamWin)
 		return Plugin_Continue;
 
-	// Don't transmit to non-ghost players
-	if (iOther != iClient && IsClientInGhostMode(iClient) && !IsClientInGhostMode(iOther))
+	// Transmit to non-ghost players with enabled cookie
+	if (!IsClientInGhostMode(iOther))
+	{
+		if (Cookie_Get(iOther, g_hSeeGhostCookie))
+			return Plugin_Continue;
+
 		return Plugin_Handled;
+	}
 
 	return Plugin_Continue;
 }
@@ -121,21 +140,7 @@ public Action Command_Ghost(int iClient, int iArgc)
 	if (iClient == 0)
 		return Plugin_Handled;
 
-	if (Cookie_Get(iClient))
-	{
-		Cookie_Set(iClient, "0");
-		PrintToChat(iClient, "\x07E17100[SM] Ghost mode disabled");
-		Client_CancelGhostMode(iClient);
-	}
-	else
-	{
-		Cookie_Set(iClient, "1");
-		PrintToChat(iClient, "\x07E19F00[SM] Ghost mode enabled");
-
-		if (IsActiveRound() && !IsPlayerAlive(iClient))
-			CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
-	}
-
+	Menu_DisplayMain(iClient);
 	return Plugin_Handled;
 }
 
@@ -178,11 +183,77 @@ public void Event_PlayerDeath(Event hEvent, const char[] sName, bool bDontBroadc
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
 		return;
 
+	GetClientAbsOrigin(iClient, g_flPlayerPos[iClient]);
+	GetClientEyeAngles(iClient, g_flPlayerAng[iClient]);
+
 	if (hEvent.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER)
 		return;
 
-	if (IsActiveRound() && Cookie_Get(iClient))
+	if (IsActiveRound() && Cookie_Get(iClient, g_hBeGhostCookie))
 		CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+void Menu_DisplayMain(int iClient)
+{
+	Menu hMenu = new Menu(Menu_SelectMain);
+	hMenu.SetTitle("%T\n ", "Menu_MainTitle", iClient);
+
+	char sBuffer[256];
+
+	Format(sBuffer, sizeof(sBuffer), "%T (%s)", "Menu_BeGhost", iClient, Cookie_Get(iClient, g_hBeGhostCookie) ? "+" : "-");
+	hMenu.AddItem("beghost", sBuffer);
+
+	Format(sBuffer, sizeof(sBuffer), "%T (%s)", "Menu_SeeGhost", iClient, Cookie_Get(iClient, g_hSeeGhostCookie) ? "+" : "-");
+	hMenu.AddItem("seeghost", sBuffer);
+
+	Format(sBuffer, sizeof(sBuffer), "%T (%s)", "Menu_ThirdPerson", iClient, Cookie_Get(iClient, g_hThirdPersonCookie) ? "+" : "-");
+	hMenu.AddItem("thirdperson", sBuffer);
+
+	hMenu.Display(iClient, MENU_TIME_FOREVER);
+}
+
+public int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSelect)
+{
+	switch (action)
+	{
+		case MenuAction_Select:
+		{
+			char sInfo[32];
+			hMenu.GetItem(iSelect, sInfo, sizeof(sInfo));
+
+			if (StrEqual(sInfo, "beghost"))
+			{
+				bool bValue = !Cookie_Get(iClient, g_hBeGhostCookie);
+				Cookie_Set(iClient, g_hBeGhostCookie, bValue);
+
+				if (bValue)
+				{
+					Menu_DisplayMain(iClient);
+					if (IsActiveRound() && !IsPlayerAlive(iClient))
+						CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
+				}
+				else
+					Client_CancelGhostMode(iClient);
+			}
+			else if (StrEqual(sInfo, "seeghost"))
+			{
+				Cookie_Set(iClient, g_hSeeGhostCookie, !Cookie_Get(iClient, g_hSeeGhostCookie));
+				Menu_DisplayMain(iClient);
+			}
+			else if (StrEqual(sInfo, "thirdperson"))
+			{
+				bool bValue = !Cookie_Get(iClient, g_hThirdPersonCookie);
+				Cookie_Set(iClient, g_hThirdPersonCookie, bValue);
+				Menu_DisplayMain(iClient);
+
+				if (bValue && IsClientInGhostMode(iClient))
+					SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
+			}
+		}
+		case MenuAction_End: delete hMenu;
+	}
+
+	return 0;
 }
 
 void Client_CancelGhostMode(int iClient)
@@ -193,7 +264,6 @@ void Client_CancelGhostMode(int iClient)
 	Client_SetGhostMode(iClient, false);
 	SetEntProp(iClient, Prop_Send, "m_lifeState", 0);
 	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
-
 	ForcePlayerSuicide(iClient);
 }
 
@@ -216,7 +286,8 @@ void Client_SetGhostMode(int iClient, bool bState)
 		int iColor[4]; iColor = TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_COLOR_RED : GHOST_COLOR_BLUE;
 		SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
 
-		Client_SetNextGhostTarget(iClient);
+		TeleportEntity(iClient, g_flPlayerPos[iClient], g_flPlayerAng[iClient]);
+		TE_Particle(iClient, GHOST_PARTICLE);
 		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
 	}
 	else
@@ -255,8 +326,11 @@ public Action Timer_PostGhostMode(Handle hTimer, any userid)
 	}
 
 	TF2_RemoveAllWeapons(iClient);
-	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 	SetEntPropFloat(iClient, Prop_Send, "m_flMaxspeed", GHOST_SPEED);
+
+	if (Cookie_Get(iClient, g_hThirdPersonCookie))
+		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
+
 	return Plugin_Continue;
 }
 
@@ -321,19 +395,32 @@ bool IsActiveRound()
 	return state == RoundState_RoundRunning || state == RoundState_Stalemate;
 }
 
-bool Cookie_Get(int iClient)
+bool Cookie_Get(int iClient, Cookie cookie)
 {
 	char sValue[8];
-	g_hGhostCookie.Get(iClient, sValue, sizeof(sValue));
-	if (!sValue[0] || StringToInt(sValue))
-		return true;
+	cookie.Get(iClient, sValue, sizeof(sValue));
 
-	return false;
+	if (!sValue[0])
+		return cookie != g_hSeeGhostCookie;
+
+	return !!StringToInt(sValue);
 }
 
-void Cookie_Set(int iClient, const char[] sValue)
+void Cookie_Set(int iClient, Cookie cookie, bool bValue)
 {
-	g_hGhostCookie.Set(iClient, sValue);
+	char sValue[8];
+	IntToString(view_as<int>(bValue), sValue, sizeof(sValue));
+	cookie.Set(iClient, sValue);
+}
+
+void TE_Particle(int iClient, const char[] sParticle)
+{
+	int iTable = FindStringTable("ParticleEffectNames");
+
+	TE_Start("TFParticleEffect");
+	TE_WriteNum("entindex", iClient);
+	TE_WriteNum("m_iParticleSystemIndex", FindStringIndex(iTable, sParticle));
+	TE_SendToAll();
 }
 
 void GameData_Init()

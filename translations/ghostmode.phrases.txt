@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"Menu_MainTitle"
+	{
+		"en"	"Ghost mode"
+		"ru"	"Режим призрака"
+	}
+
+	"Menu_BeGhost"
+	{
+		"en"	"Be ghost"
+		"ru"	"Быть призраком"
+	}
+	"Menu_SeeGhost"
+	{
+		"en"	"See ghosts (when alive)"
+		"ru"	"Видеть призраков (когда живой)"
+	}
+	"Menu_ThirdPerson"
+	{
+		"en"	"Third person"
+		"ru"	"Третье лицо"
+	}
+}
