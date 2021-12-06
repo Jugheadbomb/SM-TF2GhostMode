@@ -1,3 +1,5 @@
+![](https://user-images.githubusercontent.com/53791065/144823856-23b2adf3-6a87-4e98-b20d-2f60739a1d5d.gif)
+
 # [TF2] Ghost Mode
 Description: When player dies he becomes ghost
 
@@ -14,5 +16,3 @@ Description: When player dies he becomes ghost
 
 ## Commands
 - **sm_ghost** - Turn on/off automatic ghost mode on death (Saved with cookie)
-
-![](https://user-images.githubusercontent.com/53791065/138552005-163483c4-0278-4585-9b46-002a1d77a84e.gif)
