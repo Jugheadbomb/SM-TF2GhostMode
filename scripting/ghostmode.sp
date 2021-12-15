@@ -273,7 +273,6 @@ void Client_SetGhostMode(int iClient, bool bState)
 		TF2_AddCondition(iClient, TFCond_SwimmingNoEffects);
 		SetEntProp(iClient, Prop_Send, "m_lifeState", 2);
 		SetEntProp(iClient, Prop_Send, "m_iHideHUD", 8);
-		SetEntProp(iClient, Prop_Send, "m_iClass", view_as<int>(TFClass_Spy)); // allow see enemy health
 
 		SetVariantString(TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_MODEL_RED : GHOST_MODEL_BLUE);
 		AcceptEntityInput(iClient, "SetCustomModel");
