@@ -25,10 +25,15 @@ enum
 	State_Ghost		// Ghost
 }
 
-int g_iPlayerState[TF_MAXPLAYERS + 1];
-int g_iPlayerGhostTarget[TF_MAXPLAYERS + 1];
-float g_flPlayerPos[TF_MAXPLAYERS + 1][3];
-float g_flPlayerAng[TF_MAXPLAYERS + 1][3];
+enum struct Player
+{
+	int iState;
+	int iTargetEnt;
+	float flPos[3];
+	float flAng[3];
+}
+
+Player g_Player[TF_MAXPLAYERS + 1];
 
 Cookie g_hBeGhostCookie;
 Cookie g_hSeeGhostCookie;
@@ -38,7 +43,7 @@ public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.3",
+	version = "1.4",
 	url = "https://steamcommunity.com/id/jugheadq"
 };
 
@@ -55,8 +60,8 @@ public void OnPluginStart()
 	AddCommandListener(CL_Joinclass, "joinclass");
 	AddCommandListener(CL_Joinclass, "join_class");
 
-	HookEvent("player_spawn", Event_PlayerSpawn);
-	HookEvent("player_death", Event_PlayerDeath);
+	HookEvent("player_spawn", Event_PlayerState);
+	HookEvent("player_death", Event_PlayerState);
 
 	GameData_Init();
 	LoadTranslations("ghostmode.phrases");
@@ -81,7 +86,7 @@ public void OnPluginEnd()
 
 public void OnClientPutInServer(int iClient)
 {
-	g_iPlayerState[iClient] = State_Ignore;
+	g_Player[iClient].iState = State_Ignore;
 	SDKHook(iClient, SDKHook_PreThink, Hook_PreThink);
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 }
@@ -163,29 +168,26 @@ public Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
 	return Plugin_Handled;
 }
 
-public void Event_PlayerSpawn(Event hEvent, const char[] sName, bool bDontBroadcast)
+public void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadcast)
 {
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
 		return;
 
-	Client_SetGhostMode(iClient, (IsActiveRound() && g_iPlayerState[iClient] == State_Ready) ? true : false);
-}
-
-public void Event_PlayerDeath(Event hEvent, const char[] sName, bool bDontBroadcast)
-{
-	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
+	if (StrEqual(sName[7], "spawn"))
+	{
+		Client_SetGhostMode(iClient, (IsActiveRound() && g_Player[iClient].iState == State_Ready));
 		return;
+	}
 
-	GetClientAbsOrigin(iClient, g_flPlayerPos[iClient]);
-	GetClientEyeAngles(iClient, g_flPlayerAng[iClient]);
+	GetClientAbsOrigin(iClient, g_Player[iClient].flPos);
+	GetClientEyeAngles(iClient, g_Player[iClient].flAng);
 
 	if (hEvent.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER)
 		return;
 
 	if (IsActiveRound() && Cookie_Get(iClient, g_hBeGhostCookie))
-		CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
+		CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
 }
 
 void Menu_DisplayMain(int iClient)
@@ -224,8 +226,8 @@ public int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSele
 				if (bValue)
 				{
 					Menu_DisplayMain(iClient);
-					if (IsActiveRound() && !IsPlayerAlive(iClient))
-						CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
+					if (!IsPlayerAlive(iClient))
+						CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
 				}
 				else
 					Client_CancelGhostMode(iClient);
@@ -264,8 +266,8 @@ void Client_CancelGhostMode(int iClient)
 
 void Client_SetGhostMode(int iClient, bool bState)
 {
-	g_iPlayerGhostTarget[iClient] = INVALID_ENT_REFERENCE;
-	g_iPlayerState[iClient] = bState ? State_Ghost : State_Ignore;
+	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
+	g_Player[iClient].iState = bState ? State_Ghost : State_Ignore;
 	SetEntProp(iClient, Prop_Send, "m_CollisionGroup", bState ? 1 : 5);
 
 	if (bState)
@@ -280,9 +282,9 @@ void Client_SetGhostMode(int iClient, bool bState)
 		int iColor[4]; iColor = TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_COLOR_RED : GHOST_COLOR_BLUE;
 		SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
 
-		TeleportEntity(iClient, g_flPlayerPos[iClient], g_flPlayerAng[iClient]);
+		TeleportEntity(iClient, g_Player[iClient].flPos, g_Player[iClient].flAng);
 		TE_Particle(iClient, GHOST_PARTICLE);
-		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient), TIMER_FLAG_NO_MAPCHANGE);
+		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient));
 	}
 	else
 	{
@@ -336,18 +338,18 @@ public Action Timer_Respawn(Handle hTimer, any userid)
 
 	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red)
 	{
-		g_iPlayerState[iClient] = State_Ready;
+		g_Player[iClient].iState = State_Ready;
 		TF2_RespawnPlayer(iClient);
 	}
 	else
-		g_iPlayerState[iClient] = State_Ignore;
+		g_Player[iClient].iState = State_Ignore;
 
 	return Plugin_Continue;
 }
 
 void Client_SetNextGhostTarget(int iClient)
 {
-	int iLastTarget = EntRefToEntIndex(g_iPlayerGhostTarget[iClient]);
+	int iLastTarget = EntRefToEntIndex(g_Player[iClient].iTargetEnt);
 	int iNextTarget = -1, iFirstTarget = -1;
 
 	for (int i = 1; i <= MaxClients; i++)
@@ -368,7 +370,7 @@ void Client_SetNextGhostTarget(int iClient)
 	int iTarget = (0 < iNextTarget <= MaxClients && IsClientInGame(iNextTarget)) ? iNextTarget : iFirstTarget;
 	if (0 < iTarget <= MaxClients && IsClientInGame(iTarget))
 	{
-		g_iPlayerGhostTarget[iClient] = EntIndexToEntRef(iTarget);
+		g_Player[iClient].iTargetEnt = EntIndexToEntRef(iTarget);
 
 		float flPos[3], flAng[3], flVel[3];
 		GetClientAbsOrigin(iTarget, flPos);
@@ -380,7 +382,7 @@ void Client_SetNextGhostTarget(int iClient)
 
 bool IsClientInGhostMode(int iClient)
 {
-	return g_iPlayerState[iClient] == State_Ghost;
+	return g_Player[iClient].iState == State_Ghost;
 }
 
 bool IsActiveRound()
@@ -409,7 +411,9 @@ void Cookie_Set(int iClient, Cookie cookie, bool bValue)
 
 void TE_Particle(int iClient, const char[] sParticle)
 {
-	int iTable = FindStringTable("ParticleEffectNames");
+	static int iTable = INVALID_STRING_TABLE;
+	if (iTable == INVALID_STRING_TABLE)
+		iTable = FindStringTable("ParticleEffectNames");
 
 	TE_Start("TFParticleEffect");
 	TE_WriteNum("entindex", iClient);
@@ -424,7 +428,9 @@ void GameData_Init()
 		SetFailState("Could not find ghostmode.txt gamedata!");
 
 	DynamicDetour detour = DynamicDetour.FromConf(hGameData, "PassEntityFilter");
-	if (!detour.Enable(Hook_Post, DHook_PassEntityFilter))
+	if (detour)
+		detour.Enable(Hook_Post, DHook_PassEntityFilter);
+	else
 		LogError("Failed to detour \"PassEntityFilter\".");
 
 	delete hGameData;
