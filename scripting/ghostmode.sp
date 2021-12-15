@@ -285,6 +285,7 @@ void Client_SetGhostMode(int iClient, bool bState)
 		TeleportEntity(iClient, g_Player[iClient].flPos, g_Player[iClient].flAng);
 		TE_Particle(iClient, GHOST_PARTICLE);
 		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient));
+		CreateTimer(0.1, Timer_ReApplyModel, GetClientUserId(iClient), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	}
 	else
 	{
@@ -327,6 +328,23 @@ public Action Timer_PostGhostMode(Handle hTimer, any userid)
 	if (Cookie_Get(iClient, g_hThirdPersonCookie))
 		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 
+	return Plugin_Continue;
+}
+
+public Action Timer_ReApplyModel(Handle hTimer, any userid)
+{
+	int iClient = GetClientOfUserId(userid);
+	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !IsClientInGhostMode(iClient))
+		return Plugin_Stop;
+
+	char sModel[PLATFORM_MAX_PATH];
+	GetClientModel(iClient, sModel, sizeof(sModel));
+
+	if (StrEqual(sModel, GHOST_MODEL_RED) || StrEqual(sModel, GHOST_MODEL_BLUE))
+		return Plugin_Continue;
+
+	SetVariantString(TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_MODEL_RED : GHOST_MODEL_BLUE);
+	AcceptEntityInput(iClient, "SetCustomModel");
 	return Plugin_Continue;
 }
 
