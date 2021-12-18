@@ -53,7 +53,7 @@ public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.4",
+	version = "1.5",
 	url = "https://steamcommunity.com/id/jugheadq"
 };
 
@@ -68,6 +68,8 @@ public void OnPluginStart()
 
 	AddCommandListener(CL_Voicemenu, "voicemenu");
 	AddCommandListener(CL_Joinclass, "joinclass");
+	AddCommandListener(CL_Jointeam, "jointeam");
+	AddCommandListener(CL_Jointeam, "spectate");
 
 	HookEvent("player_spawn", Event_PlayerState);
 	HookEvent("player_death", Event_PlayerState);
@@ -174,6 +176,11 @@ public Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
 		SetEntProp(iClient, Prop_Send, "m_iDesiredPlayerClass", view_as<int>(class));
 
 	return Plugin_Handled;
+}
+
+public Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
+{
+	return g_Player[iClient].IsGhost() ? Plugin_Handled : Plugin_Continue;
 }
 
 public void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadcast)
