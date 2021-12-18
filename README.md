@@ -15,4 +15,4 @@ Description: When player dies he becomes ghost
 - Ghosts can teleport to random alive player using command **voicemenu** [E]
 
 ## Commands
-- **sm_ghost** - Turn on/off automatic ghost mode on death (Saved with cookie)
+- **sm_ghost** - Open main menu with settings: be ghost, see ghosts (when alive), third person
