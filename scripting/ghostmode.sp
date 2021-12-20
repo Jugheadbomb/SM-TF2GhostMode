@@ -68,8 +68,10 @@ public void OnPluginStart()
 
 	AddCommandListener(CL_Voicemenu, "voicemenu");
 	AddCommandListener(CL_Joinclass, "joinclass");
+	AddCommandListener(CL_Joinclass, "join_class");
 	AddCommandListener(CL_Jointeam, "jointeam");
 	AddCommandListener(CL_Jointeam, "spectate");
+	AddCommandListener(CL_Jointeam, "autoteam");
 
 	HookEvent("player_spawn", Event_PlayerState);
 	HookEvent("player_death", Event_PlayerState);
