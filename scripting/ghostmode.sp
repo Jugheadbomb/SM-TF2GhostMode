@@ -15,7 +15,6 @@
 #define GHOST_MODEL_RED		"models/props_halloween/ghost_no_hat_red.mdl"
 #define GHOST_MODEL_BLU		"models/props_halloween/ghost_no_hat.mdl"
 
-#define GHOST_SPEED		375.0 // -20% in TFCond_SwimmingNoEffects (300)
 #define GHOST_PARTICLE		"ghost_appearation"
 
 enum
@@ -49,11 +48,13 @@ Cookie g_hBeGhostCookie;
 Cookie g_hSeeGhostCookie;
 Cookie g_hThirdPersonCookie;
 
+Handle g_hSDKGetBaseEntity;
+
 public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.5",
+	version = "1.6",
 	url = "https://steamcommunity.com/id/jugheadq"
 };
 
@@ -103,22 +104,19 @@ public void OnClientPutInServer(int iClient)
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 }
 
-public MRESReturn DHook_PassEntityFilter(DHookReturn ret, DHookParam params)
+public MRESReturn DHook_PlayerSharedInCondPost(Address pPlayerShared, DHookReturn ret, DHookParam params)
 {
-	if (params.IsNull(1) || params.IsNull(2))
+	static int iPlayerShared = -1;
+	if (iPlayerShared == -1)
+		iPlayerShared = FindSendPropInfo("CTFPlayer", "m_Shared");
+
+	int iClient = SDK_GetBaseEntity(pPlayerShared - view_as<Address>(iPlayerShared));
+	if (!iClient)
 		return MRES_Ignored;
 
-	int iEntity = params.Get(1);
-	if (0 < iEntity <= MaxClients && g_Player[iEntity].IsGhost())
+	if (params.Get(1) == TFCond_HalloweenGhostMode && g_Player[iClient].IsGhost())
 	{
-		ret.Value = false;
-		return MRES_Supercede;
-	}
-
-	iEntity = params.Get(2);
-	if (0 < iEntity <= MaxClients && g_Player[iEntity].IsGhost())
-	{
-		ret.Value = false;
+		ret.Value = true;
 		return MRES_Supercede;
 	}
 
@@ -197,7 +195,7 @@ public void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadc
 		GetClientEyeAngles(iClient, g_Player[iClient].flAng);
 
 		if (Cookie_Get(iClient, g_hBeGhostCookie) && !(hEvent.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER))
-			CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
+			CreateTimer(0.1, Timer_Respawn, iClient);
 	}
 	else
 		Client_SetGhostMode(iClient, g_Player[iClient].IsReady());
@@ -239,7 +237,7 @@ public int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSele
 				{
 					Menu_DisplayMain(iClient);
 					if (!IsPlayerAlive(iClient))
-						CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
+						CreateTimer(0.1, Timer_Respawn, iClient);
 				}
 				else
 					Client_CancelGhostMode(iClient);
@@ -272,7 +270,7 @@ void Client_CancelGhostMode(int iClient)
 	Client_SetGhostMode(iClient, false);
 	SetEntProp(iClient, Prop_Send, "m_lifeState", 0);
 	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
-	ForcePlayerSuicide(iClient);
+	SDKHooks_TakeDamage(iClient, 0, 0, GetEntProp(iClient, Prop_Send, "m_iHealth") * 1.0);
 }
 
 void Client_SetGhostMode(int iClient, bool bState)
@@ -283,33 +281,51 @@ void Client_SetGhostMode(int iClient, bool bState)
 
 	if (bState)
 	{
-		TF2_AddCondition(iClient, TFCond_SwimmingNoEffects);
 		SetEntProp(iClient, Prop_Send, "m_lifeState", 2);
 		SetEntProp(iClient, Prop_Send, "m_iHideHUD", 8);
 
-		SetVariantString(TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_MODEL_RED : GHOST_MODEL_BLU);
-		AcceptEntityInput(iClient, "SetCustomModel");
+		// Model
+		char sModel[64];
+		GetGhostModel(iClient, sModel, sizeof(sModel));
+		SetVariantString(sModel); AcceptEntityInput(iClient, "SetCustomModel");
 
-		int iColor[4]; iColor = TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_COLOR_RED : GHOST_COLOR_BLU;
+		// Render color
+		int iColor[4];
+		GetGhostColor(iClient, iColor);
 		SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
 
 		TeleportEntity(iClient, g_Player[iClient].flPos, g_Player[iClient].flAng);
 		TE_Particle(iClient, GHOST_PARTICLE);
-		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient));
-		CreateTimer(0.1, Timer_GhostMode, GetClientUserId(iClient), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
+
+		CreateTimer(0.1, Timer_PostGhostMode, iClient);
+		CreateTimer(0.1, Timer_CheckModel, GetClientUserId(iClient), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	}
 	else
 	{
-		SetVariantString("");
-		AcceptEntityInput(iClient, "SetCustomModel");
+		SetVariantString(""); AcceptEntityInput(iClient, "SetCustomModel");
 		SetEntityRenderColor(iClient, 255, 255, 255, 255);
 	}
 }
 
-public Action Timer_PostGhostMode(Handle hTimer, any userid)
+public Action Timer_Respawn(Handle hTimer, int iClient)
 {
-	int iClient = GetClientOfUserId(userid);
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
+	if (!IsClientInGame(iClient))
+		return Plugin_Continue;
+
+	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red)
+	{
+		g_Player[iClient].iState = State_Ready;
+		TF2_RespawnPlayer(iClient);
+	}
+	else
+		g_Player[iClient].iState = State_Ignore;
+
+	return Plugin_Continue;
+}
+
+public Action Timer_PostGhostMode(Handle hTimer, int iClient)
+{
+	if (!IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
 		return Plugin_Continue;
 
 	int iEntity = MaxClients + 1;
@@ -334,7 +350,6 @@ public Action Timer_PostGhostMode(Handle hTimer, any userid)
 	}
 
 	TF2_RemoveAllWeapons(iClient);
-	SetEntPropFloat(iClient, Prop_Send, "m_flMaxspeed", GHOST_SPEED);
 
 	if (Cookie_Get(iClient, g_hThirdPersonCookie))
 		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
@@ -342,39 +357,23 @@ public Action Timer_PostGhostMode(Handle hTimer, any userid)
 	return Plugin_Continue;
 }
 
-public Action Timer_GhostMode(Handle hTimer, any userid)
+public Action Timer_CheckModel(Handle hTimer, int iUserid)
 {
-	int iClient = GetClientOfUserId(userid);
+	int iClient = GetClientOfUserId(iUserid);
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
 		return Plugin_Stop;
 
 	if (GetEntProp(iClient, Prop_Send, "m_nForceTauntCam") == 1)
 		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 
-	char sModel[PLATFORM_MAX_PATH];
+	char sModel[64];
 	GetEntPropString(iClient, Prop_Send, "m_iszCustomModel", sModel, sizeof(sModel));
 
-	if (StrEqual(sModel, GHOST_MODEL_RED) || StrEqual(sModel, GHOST_MODEL_BLU))
-		return Plugin_Continue;
-
-	SetVariantString(TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_MODEL_RED : GHOST_MODEL_BLU);
-	AcceptEntityInput(iClient, "SetCustomModel");
-	return Plugin_Continue;
-}
-
-public Action Timer_Respawn(Handle hTimer, any userid)
-{
-	int iClient = GetClientOfUserId(userid);
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
-		return Plugin_Continue;
-
-	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red)
+	if (!StrEqual(sModel, GHOST_MODEL_RED) && !StrEqual(sModel, GHOST_MODEL_BLU))
 	{
-		g_Player[iClient].iState = State_Ready;
-		TF2_RespawnPlayer(iClient);
+		GetGhostModel(iClient, sModel, sizeof(sModel));
+		SetVariantString(sModel); AcceptEntityInput(iClient, "SetCustomModel");
 	}
-	else
-		g_Player[iClient].iState = State_Ignore;
 
 	return Plugin_Continue;
 }
@@ -449,17 +448,34 @@ void TE_Particle(int iClient, const char[] sParticle)
 	TE_SendToAll();
 }
 
+void GetGhostModel(int iClient, char[] sBuffer, int iMaxlen)
+{
+	strcopy(sBuffer, iMaxlen, (TF2_GetClientTeam(iClient) == TFTeam_Red) ? GHOST_MODEL_RED : GHOST_MODEL_BLU);
+}
+
+void GetGhostColor(int iClient, int iColor[4])
+{
+	iColor = TF2_GetClientTeam(iClient) == TFTeam_Red ? GHOST_COLOR_RED : GHOST_COLOR_BLU;
+}
+
+int SDK_GetBaseEntity(Address pEntity)
+{
+	return SDKCall(g_hSDKGetBaseEntity, pEntity);
+}
+
 void GameData_Init()
 {
 	GameData hGameData = new GameData("ghostmode");
 	if (!hGameData)
 		SetFailState("Could not find ghostmode.txt gamedata!");
 
-	DynamicDetour detour = DynamicDetour.FromConf(hGameData, "PassEntityFilter");
-	if (detour)
-		detour.Enable(Hook_Post, DHook_PassEntityFilter);
-	else
-		LogError("Failed to detour \"PassEntityFilter\".");
+	DynamicDetour.FromConf(hGameData, "CTFPlayerShared::InCond").Enable(Hook_Post, DHook_PlayerSharedInCondPost);
+
+	StartPrepSDKCall(SDKCall_Raw);
+	PrepSDKCall_SetFromConf(hGameData, SDKConf_Virtual, "CBaseEntity::GetBaseEntity");
+	PrepSDKCall_SetReturnInfo(SDKType_CBaseEntity, SDKPass_Pointer);
+	if (!(g_hSDKGetBaseEntity = EndPrepSDKCall()))
+		LogError("Failed to create call: CBaseEntity::GetBaseEntity");
 
 	delete hGameData;
 }

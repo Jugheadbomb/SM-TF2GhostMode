@@ -4,32 +4,36 @@
 	{
 		"Functions"
 		{
-			"PassEntityFilter"
+			"CTFPlayerShared::InCond"
 			{
-				"signature"			"PassEntityFilter"
-				"callconv"			"cdecl"
-				"return"			"bool"
-				"this"				"ignore"
+				"signature"		"CTFPlayerShared::InCond"
+				"callconv"		"thiscall"
+				"return"		"bool"
+				"this"			"address"
 				"arguments"
 				{
-					"pEntity1"
+					"nCond"
 					{
-						"type"		"cbaseentity"
-					}
-					"pEntity2"
-					{
-						"type"		"cbaseentity"
+						"type"	"int"
 					}
 				}
 			}
 		}
 		"Signatures"
 		{
-			"PassEntityFilter"
+			"CTFPlayerShared::InCond"
 			{
-				"library" 			"server"
-				"linux"				"@_Z22PassServerEntityFilterPK13IHandleEntityS1_"
-				"windows"			"\x55\x8B\xEC\x56\x8B\x2A\x2A\x85\x2A\x75\x2A\xB0\x2A\x5E"
+				"library"		"server"
+				"linux"			"@_ZNK15CTFPlayerShared6InCondE7ETFCond"
+				"windows"		"\x55\x8B\xEC\x83\xEC\x08\x56\x57\x8B\x7D\x08\x8B\xF1\x83\xFF\x20"
+			}
+		}
+		"Offsets"
+		{
+			"CBaseEntity::GetBaseEntity"
+			{
+				"linux"			"6"
+				"windows"		"5"
 			}
 		}
 	}
