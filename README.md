@@ -1,9 +1,10 @@
-![](https://user-images.githubusercontent.com/53791065/144823856-23b2adf3-6a87-4e98-b20d-2f60739a1d5d.gif)
+![](https://user-images.githubusercontent.com/53791065/178198431-5250e556-7e01-4ffc-8f82-9a3beb90dc48.gif)
 
 # [TF2] Ghost Mode
 Description: When player dies he becomes ghost
 
 ## Dependencies
+- Sourcemod 1.10+
 - [DHooks2](https://github.com/peace-maker/DHooks2/releases) - No lower than **2.2.0-detours15** version
 
 ## Notes
