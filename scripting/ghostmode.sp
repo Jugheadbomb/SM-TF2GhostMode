@@ -147,7 +147,7 @@ public Action Hook_SetTransmit(int iClient, int iOther)
 		return Plugin_Continue;
 
 	// Transmit to alive players with enabled cookie (always transmit to dead/ghost players)
-	if (IsPlayerAlive(iClient))
+	if (IsPlayerAlive(iOther))
 		return Preferences_Get(iOther, Preference_SeeGhost) ? Plugin_Continue : Plugin_Handled;
 
 	return Plugin_Continue;
