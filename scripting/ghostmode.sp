@@ -118,6 +118,17 @@ public void OnClientDisconnect(int iClient)
 	Preferences_SetAll(iClient, -1);
 }
 
+public Action OnPlayerRunCmd(int iClient, int &iButtons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+{
+	if (g_Player[iClient].IsGhost())
+	{
+		iButtons &= ~IN_USE;
+		return Plugin_Changed;
+	}
+
+	return Plugin_Continue;
+}
+
 public MRESReturn DHook_PlayerSharedInCondPost(Address pPlayerShared, DHookReturn ret, DHookParam params)
 {
 	static int iPlayerShared = -1;
