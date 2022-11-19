@@ -382,7 +382,7 @@ public Action Timer_PostGhostMode(Handle hTimer, int iClient)
 		return Plugin_Continue;
 
 	int iEntity = MaxClients + 1;
-	while ((iEntity = FindEntityByClassname(iEntity, "tf_wearable")) > MaxClients)
+	while ((iEntity = FindEntityByClassname(iEntity, "tf_wearable*")) > MaxClients)
 	{
 		if (GetEntPropEnt(iEntity, Prop_Send, "m_hOwnerEntity") == iClient)
 			TF2_RemoveWearable(iClient, iEntity);
