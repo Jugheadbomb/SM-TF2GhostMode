@@ -304,7 +304,7 @@ void Client_SetGhostMode(int iClient, bool bState)
 {
 	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
 	g_Player[iClient].iState = bState ? State_Ghost : State_Ignore;
-	SetEntProp(iClient, Prop_Send, "m_CollisionGroup", bState ? 1 : 5);
+	SetEntityCollisionGroup(iClient, bState ? 1 : 5);
 
 	if (bState)
 	{
