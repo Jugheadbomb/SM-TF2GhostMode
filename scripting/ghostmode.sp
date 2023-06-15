@@ -9,6 +9,11 @@
 
 #define TF_MAXPLAYERS		34
 
+#define LIFE_ALIVE 0
+#define LIFE_DEAD 2
+
+#define HIDEHUD_HEALTH 8
+
 #define GHOST_COLOR_RED		{ 159, 55, 34, 255 }
 #define GHOST_COLOR_BLU		{ 76, 109, 129, 255 }
 
@@ -24,25 +29,34 @@ enum GhostState
 	State_Ghost	// Ghost
 };
 
-enum GhostPreference
-{
-	Preference_BeGhost,
-	Preference_SeeGhost,
-	Preference_ThirdPerson
-};
-
 enum struct Player
 {
 	GhostState iState;
 
 	int iTargetEnt;
 	int iPreferences;
-	float flPos[3];
-	float flAng[3];
+	float vecPos[3];
+	float vecAng[3];
 
 	bool IsGhost() { return this.iState == State_Ghost; }
 	bool IsReady() { return this.iState == State_Ready && IsActiveRound(); }
 }
+
+enum GhostPreference
+{
+	Preference_BeGhost,
+	Preference_SeeGhost,
+	Preference_ThirdPerson,
+
+	Preference_MAX
+};
+
+char g_sPreferenceNames[Preference_MAX][] = 
+{
+	"Menu_BeGhost",
+	"Menu_SeeGhost",
+	"Menu_ThirdPerson"
+};
 
 Player g_Player[TF_MAXPLAYERS];
 Handle g_hSDKGetBaseEntity;
@@ -73,7 +87,22 @@ public void OnPluginStart()
 	HookEvent("player_spawn", Event_PlayerState);
 	HookEvent("player_death", Event_PlayerState);
 
-	GameData_Init();
+	GameData hGameData = new GameData("ghostmode");
+	if (!hGameData)
+		SetFailState("Could not find ghostmode.txt gamedata!");
+
+	DynamicDetour detour = DynamicDetour.FromConf(hGameData, "CTFPlayerShared::InCond");
+	if (detour)
+		detour.Enable(Hook_Post, DHook_CTFPlayerShared_InCond_Post);
+
+	StartPrepSDKCall(SDKCall_Raw);
+	PrepSDKCall_SetFromConf(hGameData, SDKConf_Virtual, "CBaseEntity::GetBaseEntity");
+	PrepSDKCall_SetReturnInfo(SDKType_CBaseEntity, SDKPass_Pointer);
+	if (!(g_hSDKGetBaseEntity = EndPrepSDKCall()))
+		LogError("Failed to create call: CBaseEntity::GetBaseEntity");
+
+	delete hGameData;
+
 	LoadTranslations("ghostmode.phrases");
 
 	for (int i = 1; i <= MaxClients; i++)
@@ -129,7 +158,7 @@ public Action OnPlayerRunCmd(int iClient, int &iButtons, int &impulse, float vel
 	return Plugin_Continue;
 }
 
-public MRESReturn DHook_PlayerSharedInCondPost(Address pPlayerShared, DHookReturn ret, DHookParam params)
+public MRESReturn DHook_CTFPlayerShared_InCond_Post(Address pPlayerShared, DHookReturn ret, DHookParam params)
 {
 	static int iPlayerShared = -1;
 	if (iPlayerShared == -1)
@@ -216,11 +245,11 @@ public void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadc
 
 	if (StrEqual(sName[7], "death"))
 	{
-		GetClientAbsOrigin(iClient, g_Player[iClient].flPos);
-		GetClientEyeAngles(iClient, g_Player[iClient].flAng);
+		GetClientAbsOrigin(iClient, g_Player[iClient].vecPos);
+		GetClientEyeAngles(iClient, g_Player[iClient].vecAng);
 
 		if (Preferences_Get(iClient, Preference_BeGhost) && !(hEvent.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER))
-			CreateTimer(0.1, Timer_Respawn, iClient);
+			CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
 	}
 	else
 		Client_SetGhostMode(iClient, g_Player[iClient].IsReady());
@@ -231,16 +260,15 @@ void Menu_DisplayMain(int iClient)
 	Menu hMenu = new Menu(Menu_SelectMain);
 	hMenu.SetTitle("%T\n ", "Menu_MainTitle", iClient);
 
-	char sBuffer[256];
+	char sDisplay[64], sInfo[8];
+	for (int i = 0; i < sizeof(g_sPreferenceNames); i++)
+	{
+		bool bEnabled = Preferences_Get(iClient, view_as<GhostPreference>(i));
+		Format(sDisplay, sizeof(sDisplay), "%T (%s)", g_sPreferenceNames[i], bEnabled ? "+" : "-");
 
-	Format(sBuffer, sizeof(sBuffer), "%T (%s)", "Menu_BeGhost", iClient, Preferences_Get(iClient, Preference_BeGhost) ? "+" : "-");
-	hMenu.AddItem("Preference_BeGhost", sBuffer);
-
-	Format(sBuffer, sizeof(sBuffer), "%T (%s)", "Menu_SeeGhost", iClient, Preferences_Get(iClient, Preference_SeeGhost) ? "+" : "-");
-	hMenu.AddItem("Preference_SeeGhost", sBuffer);
-
-	Format(sBuffer, sizeof(sBuffer), "%T (%s)", "Menu_ThirdPerson", iClient, Preferences_Get(iClient, Preference_ThirdPerson) ? "+" : "-");
-	hMenu.AddItem("Preference_ThirdPerson", sBuffer);
+		IntToString(i, sInfo, sizeof(sInfo));
+		hMenu.AddItem(sInfo, sDisplay);
+	}
 
 	hMenu.Display(iClient, MENU_TIME_FOREVER);
 }
@@ -251,36 +279,34 @@ public int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSele
 	{
 		case MenuAction_Select:
 		{
-			char sInfo[32];
+			char sInfo[8];
 			hMenu.GetItem(iSelect, sInfo, sizeof(sInfo));
 
-			if (StrEqual(sInfo, "Preference_BeGhost"))
-			{
-				bool bValue = !Preferences_Get(iClient, Preference_BeGhost);
-				Preferences_Set(iClient, Preference_BeGhost, bValue);
+			GhostPreference pref = view_as<GhostPreference>(StringToInt(sInfo));
+			bool bEnabled = !Preferences_Get(iClient, pref);
+			Preferences_Set(iClient, pref, bEnabled);
 
-				if (bValue)
+			if (pref != Preference_BeGhost)
+				Menu_DisplayMain(iClient);
+
+			switch (pref)
+			{
+				case Preference_BeGhost:
 				{
-					Menu_DisplayMain(iClient);
-					if (!IsPlayerAlive(iClient))
-						CreateTimer(0.1, Timer_Respawn, iClient);
+					if (bEnabled)
+					{
+						Menu_DisplayMain(iClient);
+						if (!IsPlayerAlive(iClient))
+							CreateTimer(0.1, Timer_Respawn, iClient);
+					}
+					else
+						Client_CancelGhostMode(iClient);
 				}
-				else
-					Client_CancelGhostMode(iClient);
-			}
-			else if (StrEqual(sInfo, "Preference_SeeGhost"))
-			{
-				Preferences_Set(iClient, Preference_SeeGhost, !Preferences_Get(iClient, Preference_SeeGhost));
-				Menu_DisplayMain(iClient);
-			}
-			else if (StrEqual(sInfo, "Preference_ThirdPerson"))
-			{
-				bool bValue = !Preferences_Get(iClient, Preference_ThirdPerson);
-				Preferences_Set(iClient, Preference_ThirdPerson, bValue);
-				Menu_DisplayMain(iClient);
-
-				if (g_Player[iClient].IsGhost())
-					SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", bValue ? 2 : 0);
+				case Preference_ThirdPerson:
+				{
+					if (g_Player[iClient].IsGhost())
+						SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", bEnabled ? 2 : 0);
+				}
 			}
 		}
 		case MenuAction_End: delete hMenu;
@@ -295,7 +321,7 @@ void Client_CancelGhostMode(int iClient)
 		return;
 
 	Client_SetGhostMode(iClient, false);
-	SetEntProp(iClient, Prop_Send, "m_lifeState", 0);
+	SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_ALIVE);
 	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
 	SDKHooks_TakeDamage(iClient, 0, 0, GetEntProp(iClient, Prop_Send, "m_iHealth") * 1.0);
 }
@@ -308,16 +334,16 @@ void Client_SetGhostMode(int iClient, bool bState)
 
 	if (bState)
 	{
-		SetEntProp(iClient, Prop_Send, "m_lifeState", 2);
-		SetEntProp(iClient, Prop_Send, "m_iHideHUD", 8);
+		SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_DEAD);
+		SetEntProp(iClient, Prop_Send, "m_iHideHUD", HIDEHUD_HEALTH);
 
 		SetGhostModel(iClient);
 		SetGhostColor(iClient);
 
-		TeleportEntity(iClient, g_Player[iClient].flPos, g_Player[iClient].flAng, NULL_VECTOR);
+		TeleportEntity(iClient, g_Player[iClient].vecPos, g_Player[iClient].vecAng, NULL_VECTOR);
 		TE_Particle(iClient, GHOST_PARTICLE);
 
-		CreateTimer(0.1, Timer_PostGhostMode, iClient);
+		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient));
 		CreateTimer(0.1, Timer_CheckModel, GetClientUserId(iClient), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	}
 	else
@@ -352,18 +378,19 @@ void Client_SetNextGhostTarget(int iClient)
 	{
 		g_Player[iClient].iTargetEnt = EntIndexToEntRef(iTarget);
 
-		float flPos[3], flAng[3], flVel[3];
-		GetClientAbsOrigin(iTarget, flPos);
-		GetClientEyeAngles(iTarget, flAng);
-		GetEntPropVector(iTarget, Prop_Data, "m_vecAbsVelocity", flVel);
-		TeleportEntity(iClient, flPos, flAng, flVel);
+		float vecPos[3], vecAng[3], vecVel[3];
+		GetClientAbsOrigin(iTarget, vecPos);
+		GetClientEyeAngles(iTarget, vecAng);
+		GetEntPropVector(iTarget, Prop_Data, "m_vecAbsVelocity", vecVel);
+		TeleportEntity(iClient, vecPos, vecAng, vecVel);
 	}
 }
 
-public Action Timer_Respawn(Handle hTimer, int iClient)
+public Action Timer_Respawn(Handle hTimer, int iUserid)
 {
-	if (!IsClientInGame(iClient))
-		return Plugin_Continue;
+	int iClient = GetClientOfUserId(iUserid);
+	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
+		return Plugin_Handled;
 
 	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red)
 	{
@@ -373,13 +400,14 @@ public Action Timer_Respawn(Handle hTimer, int iClient)
 	else
 		g_Player[iClient].iState = State_Ignore;
 
-	return Plugin_Continue;
+	return Plugin_Handled;
 }
 
-public Action Timer_PostGhostMode(Handle hTimer, int iClient)
+public Action Timer_PostGhostMode(Handle hTimer, int iUserid)
 {
-	if (!IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
-		return Plugin_Continue;
+	int iClient = GetClientOfUserId(iUserid);
+	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
+		return Plugin_Handled;
 
 	int iEntity = MaxClients + 1;
 	while ((iEntity = FindEntityByClassname(iEntity, "tf_wearable*")) > MaxClients)
@@ -407,7 +435,7 @@ public Action Timer_PostGhostMode(Handle hTimer, int iClient)
 	if (Preferences_Get(iClient, Preference_ThirdPerson))
 		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 
-	return Plugin_Continue;
+	return Plugin_Handled;
 }
 
 public Action Timer_CheckModel(Handle hTimer, int iUserid)
@@ -431,7 +459,7 @@ public Action Timer_CheckModel(Handle hTimer, int iUserid)
 bool IsActiveRound()
 {
 	RoundState state = GameRules_GetRoundState();
-	return state == RoundState_RoundRunning || state == RoundState_Stalemate;
+	return (state == RoundState_RoundRunning || state == RoundState_Stalemate);
 }
 
 bool Preferences_Get(int iClient, GhostPreference iPreference)
@@ -535,21 +563,4 @@ void SetGhostColor(int iClient)
 int SDK_GetBaseEntity(Address pEntity)
 {
 	return SDKCall(g_hSDKGetBaseEntity, pEntity);
-}
-
-void GameData_Init()
-{
-	GameData hGameData = new GameData("ghostmode");
-	if (!hGameData)
-		SetFailState("Could not find ghostmode.txt gamedata!");
-
-	DynamicDetour.FromConf(hGameData, "CTFPlayerShared::InCond").Enable(Hook_Post, DHook_PlayerSharedInCondPost);
-
-	StartPrepSDKCall(SDKCall_Raw);
-	PrepSDKCall_SetFromConf(hGameData, SDKConf_Virtual, "CBaseEntity::GetBaseEntity");
-	PrepSDKCall_SetReturnInfo(SDKType_CBaseEntity, SDKPass_Pointer);
-	if (!(g_hSDKGetBaseEntity = EndPrepSDKCall()))
-		LogError("Failed to create call: CBaseEntity::GetBaseEntity");
-
-	delete hGameData;
 }
