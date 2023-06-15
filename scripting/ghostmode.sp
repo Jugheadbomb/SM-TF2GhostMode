@@ -12,6 +12,9 @@
 #define LIFE_ALIVE 0
 #define LIFE_DEAD 2
 
+#define COLLISION_GROUP_DEBRIS 1
+#define COLLISION_GROUP_PLAYER 5
+
 #define HIDEHUD_HEALTH 8
 
 #define GHOST_COLOR_RED		{ 159, 55, 34, 255 }
@@ -158,14 +161,14 @@ public Action OnPlayerRunCmd(int iClient, int &iButtons, int &impulse, float vel
 	return Plugin_Continue;
 }
 
-public MRESReturn DHook_CTFPlayerShared_InCond_Post(Address pPlayerShared, DHookReturn ret, DHookParam params)
+MRESReturn DHook_CTFPlayerShared_InCond_Post(Address pPlayerShared, DHookReturn ret, DHookParam params)
 {
-	static int iPlayerShared = -1;
-	if (iPlayerShared == -1)
-		iPlayerShared = FindSendPropInfo("CTFPlayer", "m_Shared");
+	static int m_Shared = -1;
+	if (m_Shared == -1)
+		m_Shared = FindSendPropInfo("CTFPlayer", "m_Shared");
 
-	int iClient = SDK_GetBaseEntity(pPlayerShared - view_as<Address>(iPlayerShared));
-	if (!iClient)
+	int iClient = SDK_GetBaseEntity(pPlayerShared - view_as<Address>(m_Shared));
+	if (iClient <= 0 || iClient > MaxClients)
 		return MRES_Ignored;
 
 	if (params.Get(1) == TFCond_HalloweenGhostMode && g_Player[iClient].IsGhost())
@@ -177,7 +180,7 @@ public MRESReturn DHook_CTFPlayerShared_InCond_Post(Address pPlayerShared, DHook
 	return MRES_Ignored;
 }
 
-public Action Hook_SetTransmit(int iClient, int iOther)
+Action Hook_SetTransmit(int iClient, int iOther)
 {
 	if (!g_Player[iClient].IsGhost() || iOther == iClient)
 		return Plugin_Continue;
@@ -186,14 +189,15 @@ public Action Hook_SetTransmit(int iClient, int iOther)
 	if (GameRules_GetRoundState() == RoundState_TeamWin)
 		return Plugin_Continue;
 
-	// Transmit to alive players with enabled cookie (always transmit to dead/ghost players)
-	if (IsPlayerAlive(iOther))
-		return Preferences_Get(iOther, Preference_SeeGhost) ? Plugin_Continue : Plugin_Handled;
+	// Don't transmit to alive players with disabled cookie
+	if (IsPlayerAlive(iOther) && !Preferences_Get(iOther, Preference_SeeGhost))
+		return Plugin_Handled;
 
+	// Transmit to dead/ghost players
 	return Plugin_Continue;
 }
 
-public Action Command_Ghost(int iClient, int iArgc)
+Action Command_Ghost(int iClient, int iArgc)
 {
 	if (iClient == 0)
 		return Plugin_Handled;
@@ -202,7 +206,7 @@ public Action Command_Ghost(int iClient, int iArgc)
 	return Plugin_Handled;
 }
 
-public Action CL_Voicemenu(int iClient, const char[] sCommand, int iArgc)
+Action CL_Voicemenu(int iClient, const char[] sCommand, int iArgc)
 {
 	if (!g_Player[iClient].IsGhost())
 		return Plugin_Continue;
@@ -211,7 +215,7 @@ public Action CL_Voicemenu(int iClient, const char[] sCommand, int iArgc)
 	return Plugin_Handled;
 }
 
-public Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
+Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
 {
 	if (iArgc < 1 || !g_Player[iClient].IsGhost())
 		return Plugin_Continue;
@@ -232,12 +236,12 @@ public Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
 	return Plugin_Handled;
 }
 
-public Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
+Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
 {
 	return g_Player[iClient].IsGhost() ? Plugin_Handled : Plugin_Continue;
 }
 
-public void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadcast)
+void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadcast)
 {
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
@@ -273,7 +277,7 @@ void Menu_DisplayMain(int iClient)
 	hMenu.Display(iClient, MENU_TIME_FOREVER);
 }
 
-public int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSelect)
+int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSelect)
 {
 	switch (action)
 	{
@@ -330,7 +334,7 @@ void Client_SetGhostMode(int iClient, bool bState)
 {
 	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
 	g_Player[iClient].iState = bState ? State_Ghost : State_Ignore;
-	SetEntityCollisionGroup(iClient, bState ? 1 : 5);
+	SetEntityCollisionGroup(iClient, bState ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_PLAYER);
 
 	if (bState)
 	{
@@ -386,7 +390,7 @@ void Client_SetNextGhostTarget(int iClient)
 	}
 }
 
-public Action Timer_Respawn(Handle hTimer, int iUserid)
+Action Timer_Respawn(Handle hTimer, int iUserid)
 {
 	int iClient = GetClientOfUserId(iUserid);
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
@@ -403,7 +407,7 @@ public Action Timer_Respawn(Handle hTimer, int iUserid)
 	return Plugin_Handled;
 }
 
-public Action Timer_PostGhostMode(Handle hTimer, int iUserid)
+Action Timer_PostGhostMode(Handle hTimer, int iUserid)
 {
 	int iClient = GetClientOfUserId(iUserid);
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
@@ -438,7 +442,7 @@ public Action Timer_PostGhostMode(Handle hTimer, int iUserid)
 	return Plugin_Handled;
 }
 
-public Action Timer_CheckModel(Handle hTimer, int iUserid)
+Action Timer_CheckModel(Handle hTimer, int iUserid)
 {
 	int iClient = GetClientOfUserId(iUserid);
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
