@@ -7,7 +7,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define TF_MAXPLAYERS		34
+#define TF_MAXPLAYERS 34
 
 #define LIFE_ALIVE 0
 #define LIFE_DEAD 2
@@ -17,13 +17,13 @@
 
 #define HIDEHUD_HEALTH 8
 
-#define GHOST_COLOR_RED		{ 159, 55, 34, 255 }
-#define GHOST_COLOR_BLU		{ 76, 109, 129, 255 }
+#define GHOST_COLOR_RED { 159, 55, 34, 255 }
+#define GHOST_COLOR_BLU { 76, 109, 129, 255 }
 
-#define GHOST_MODEL_RED		"models/props_halloween/ghost_no_hat_red.mdl"
-#define GHOST_MODEL_BLU		"models/props_halloween/ghost_no_hat.mdl"
+#define GHOST_MODEL_RED "models/props_halloween/ghost_no_hat_red.mdl"
+#define GHOST_MODEL_BLU "models/props_halloween/ghost_no_hat.mdl"
 
-#define GHOST_PARTICLE		"ghost_appearation"
+#define GHOST_PARTICLE "ghost_appearation"
 
 enum GhostState
 {
@@ -268,7 +268,7 @@ void Menu_DisplayMain(int iClient)
 	for (int i = 0; i < sizeof(g_sPreferenceNames); i++)
 	{
 		bool bEnabled = Preferences_Get(iClient, view_as<GhostPreference>(i));
-		Format(sDisplay, sizeof(sDisplay), "%T (%s)", g_sPreferenceNames[i], bEnabled ? "+" : "-");
+		Format(sDisplay, sizeof(sDisplay), "%T (%s)", g_sPreferenceNames[i], iClient, bEnabled ? "+" : "-");
 
 		IntToString(i, sInfo, sizeof(sInfo));
 		hMenu.AddItem(sInfo, sDisplay);
@@ -335,6 +335,7 @@ void Client_SetGhostMode(int iClient, bool bState)
 	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
 	g_Player[iClient].iState = bState ? State_Ghost : State_Ignore;
 	SetEntityCollisionGroup(iClient, bState ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_PLAYER);
+	EntityCollisionRulesChanged(iClient);
 
 	if (bState)
 	{
