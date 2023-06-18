@@ -301,7 +301,7 @@ int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSelect)
 					{
 						Menu_DisplayMain(iClient);
 						if (!IsPlayerAlive(iClient))
-							CreateTimer(0.1, Timer_Respawn, iClient);
+							CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
 					}
 					else
 						Client_CancelGhostMode(iClient);
