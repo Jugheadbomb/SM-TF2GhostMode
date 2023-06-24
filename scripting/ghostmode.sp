@@ -69,7 +69,7 @@ public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.8",
+	version = "1.9",
 	url = "https://steamcommunity.com/profiles/76561198241665788"
 };
 
