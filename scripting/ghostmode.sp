@@ -397,7 +397,7 @@ Action Timer_Respawn(Handle hTimer, int iUserid)
 	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
 		return Plugin_Handled;
 
-	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red)
+	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red && !IsFakeClient(iClient))
 	{
 		g_Player[iClient].iState = State_Ready;
 		TF2_RespawnPlayer(iClient);
