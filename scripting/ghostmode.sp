@@ -12,6 +12,12 @@
 #define LIFE_ALIVE 0
 #define LIFE_DEAD 2
 
+#define SOLID_NONE 0
+#define SOLID_BBOX 2
+
+#define FSOLID_NOT_SOLID 4
+#define FSOLID_NOT_STANDABLE 16
+
 #define COLLISION_GROUP_DEBRIS 1
 #define COLLISION_GROUP_PLAYER 5
 
@@ -334,8 +340,7 @@ void Client_SetGhostMode(int iClient, bool bState)
 {
 	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
 	g_Player[iClient].iState = bState ? State_Ghost : State_Ignore;
-	SetEntityCollisionGroup(iClient, bState ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_PLAYER);
-	EntityCollisionRulesChanged(iClient);
+	SetCollisions(iClient, bState);
 
 	if (bState)
 	{
@@ -563,6 +568,18 @@ void SetGhostColor(int iClient)
 {
 	int iColor[4]; iColor = (TF2_GetClientTeam(iClient) == TFTeam_Red) ? GHOST_COLOR_RED : GHOST_COLOR_BLU;
 	SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
+}
+
+void SetCollisions(int iClient, bool bInGhostMode)
+{
+	SetEntProp(iClient, Prop_Data, "m_nSolidType", bInGhostMode ? SOLID_NONE : SOLID_BBOX);
+	SetEntProp(iClient, Prop_Send, "m_nSolidType", bInGhostMode ? SOLID_NONE : SOLID_BBOX);
+
+	SetEntProp(iClient, Prop_Data, "m_usSolidFlags", bInGhostMode ? FSOLID_NOT_SOLID : FSOLID_NOT_STANDABLE);
+	SetEntProp(iClient, Prop_Send, "m_usSolidFlags", bInGhostMode ? FSOLID_NOT_SOLID : FSOLID_NOT_STANDABLE);
+
+	SetEntityCollisionGroup(iClient, bInGhostMode ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_PLAYER);
+	EntityCollisionRulesChanged(iClient);
 }
 
 int SDK_GetBaseEntity(Address pEntity)
