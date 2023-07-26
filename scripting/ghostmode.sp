@@ -7,8 +7,6 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define TF_MAXPLAYERS 34
-
 #define LIFE_ALIVE 0
 #define LIFE_DEAD 2
 
@@ -67,7 +65,7 @@ char g_sPreferenceNames[Preference_MAX][] =
 	"Menu_ThirdPerson"
 };
 
-Player g_Player[TF_MAXPLAYERS];
+Player g_Player[MAXPLAYERS];
 Handle g_hSDKGetBaseEntity;
 Cookie g_hCookiesPreferences;
 
@@ -75,7 +73,7 @@ public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.91",
+	version = "1.92",
 	url = "https://steamcommunity.com/profiles/76561198241665788"
 };
 
@@ -572,10 +570,7 @@ void SetGhostColor(int iClient)
 
 void SetCollisions(int iClient, bool bInGhostMode)
 {
-	SetEntProp(iClient, Prop_Data, "m_nSolidType", bInGhostMode ? SOLID_NONE : SOLID_BBOX);
 	SetEntProp(iClient, Prop_Send, "m_nSolidType", bInGhostMode ? SOLID_NONE : SOLID_BBOX);
-
-	SetEntProp(iClient, Prop_Data, "m_usSolidFlags", bInGhostMode ? FSOLID_NOT_SOLID : FSOLID_NOT_STANDABLE);
 	SetEntProp(iClient, Prop_Send, "m_usSolidFlags", bInGhostMode ? FSOLID_NOT_SOLID : FSOLID_NOT_STANDABLE);
 
 	SetEntityCollisionGroup(iClient, bInGhostMode ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_PLAYER);
