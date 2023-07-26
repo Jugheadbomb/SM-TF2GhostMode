@@ -7,6 +7,8 @@
 #pragma semicolon 1
 #pragma newdecls required
 
+#define TF_GAMETYPE_ARENA 4
+
 #define LIFE_ALIVE 0
 #define LIFE_DEAD 2
 
@@ -366,9 +368,14 @@ void Client_SetNextGhostTarget(int iClient)
 	int iLastTarget = EntRefToEntIndex(g_Player[iClient].iTargetEnt);
 	int iNextTarget = -1, iFirstTarget = -1;
 
+	TFTeam nTeam = TF2_GetClientTeam(iClient);
+
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (!IsClientInGame(i) || g_Player[i].IsGhost() || !IsPlayerAlive(i))
+			continue;
+
+		if (GameRules_GetProp("m_nGameType") != TF_GAMETYPE_ARENA && TF2_GetClientTeam(i) != nTeam)
 			continue;
 
 		if (iFirstTarget == -1)
