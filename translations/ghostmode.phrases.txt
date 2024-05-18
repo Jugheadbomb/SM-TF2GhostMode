@@ -16,9 +16,4 @@
 		"en"	"See ghosts (when alive)"
 		"ru"	"Видеть призраков (когда живой)"
 	}
-	"Menu_ThirdPerson"
-	{
-		"en"	"Third person"
-		"ru"	"Третье лицо"
-	}
 }

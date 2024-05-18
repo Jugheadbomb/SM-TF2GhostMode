@@ -2,7 +2,6 @@
 #include <clientprefs>
 #include <tf2_stocks>
 #include <sdkhooks>
-#include <dhooks>
 
 #pragma semicolon 1
 #pragma newdecls required
@@ -12,50 +11,23 @@
 #define LIFE_ALIVE 0
 #define LIFE_DEAD 2
 
-#define SOLID_NONE 0
-#define SOLID_BBOX 2
-
-#define FSOLID_NOT_SOLID 4
-#define FSOLID_NOT_STANDABLE 16
-
-#define COLLISION_GROUP_DEBRIS 1
-#define COLLISION_GROUP_PLAYER 5
-
-#define HIDEHUD_HEALTH 8
-
-#define GHOST_COLOR_RED { 159, 55, 34, 255 }
-#define GHOST_COLOR_BLU { 76, 109, 129, 255 }
-
 #define GHOST_MODEL_RED "models/props_halloween/ghost_no_hat_red.mdl"
 #define GHOST_MODEL_BLU "models/props_halloween/ghost_no_hat.mdl"
 
 #define GHOST_PARTICLE "ghost_appearation"
 
-enum GhostState
-{
-	State_Ignore,	// Ignored
-	State_Ready,	// Ready to become ghost
-	State_Ghost	// Ghost
-};
-
 enum struct Player
 {
-	GhostState iState;
-
 	int iTargetEnt;
 	int iPreferences;
 	float vecPos[3];
 	float vecAng[3];
-
-	bool IsGhost() { return this.iState == State_Ghost; }
-	bool IsReady() { return this.iState == State_Ready && IsActiveRound(); }
 }
 
 enum GhostPreference
 {
 	Preference_BeGhost,
-	Preference_SeeGhost,
-	Preference_ThirdPerson,
+	Preference_SeeGhosts,
 
 	Preference_MAX
 };
@@ -64,18 +36,16 @@ char g_sPreferenceNames[Preference_MAX][] =
 {
 	"Menu_BeGhost",
 	"Menu_SeeGhost",
-	"Menu_ThirdPerson"
 };
 
 Player g_Player[MAXPLAYERS];
-Handle g_hSDKGetBaseEntity;
 Cookie g_hCookiesPreferences;
 
 public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "1.9.3",
+	version = "2.0.0",
 	url = "https://steamcommunity.com/profiles/76561198241665788"
 };
 
@@ -87,30 +57,9 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_ghostmode", Command_Ghost, "Open ghostmode preferences menu");
 
 	AddCommandListener(CL_Voicemenu, "voicemenu");
-	AddCommandListener(CL_Joinclass, "joinclass");
-	AddCommandListener(CL_Joinclass, "join_class");
-	AddCommandListener(CL_Jointeam, "jointeam");
-	AddCommandListener(CL_Jointeam, "spectate");
-	AddCommandListener(CL_Jointeam, "autoteam");
+	AddCommandListener(CL_Boo, "boo");
 
-	HookEvent("player_spawn", Event_PlayerState);
-	HookEvent("player_death", Event_PlayerState);
-
-	GameData hGameData = new GameData("ghostmode");
-	if (!hGameData)
-		SetFailState("Could not find ghostmode.txt gamedata!");
-
-	DynamicDetour detour = DynamicDetour.FromConf(hGameData, "CTFPlayerShared::InCond");
-	if (detour)
-		detour.Enable(Hook_Post, DHook_CTFPlayerShared_InCond_Post);
-
-	StartPrepSDKCall(SDKCall_Raw);
-	PrepSDKCall_SetFromConf(hGameData, SDKConf_Virtual, "CBaseEntity::GetBaseEntity");
-	PrepSDKCall_SetReturnInfo(SDKType_CBaseEntity, SDKPass_Pointer);
-	if (!(g_hSDKGetBaseEntity = EndPrepSDKCall()))
-		LogError("Failed to create call: CBaseEntity::GetBaseEntity");
-
-	delete hGameData;
+	HookEvent("player_death", Event_PlayerDeath);
 
 	LoadTranslations("ghostmode.phrases");
 
@@ -126,17 +75,12 @@ public void OnPluginStart()
 
 public void OnMapStart()
 {
-	PrecacheModel(GHOST_MODEL_RED, true);
-	PrecacheModel(GHOST_MODEL_BLU, true);
+	PrecacheScriptSound("Halloween.GhostBoo");
+
+	PrecacheModel(GHOST_MODEL_RED);
+	PrecacheModel(GHOST_MODEL_BLU);
 
 	Cookies_Refresh();
-}
-
-public void OnPluginEnd()
-{
-	for (int i = 1; i <= MaxClients; i++)
-		if (IsClientInGame(i))
-			Client_CancelGhostMode(i);
 }
 
 public void OnClientConnected(int iClient)
@@ -146,7 +90,6 @@ public void OnClientConnected(int iClient)
 
 public void OnClientPutInServer(int iClient)
 {
-	g_Player[iClient].iState = State_Ignore;
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 	Cookies_OnClientJoin(iClient);
 }
@@ -156,39 +99,34 @@ public void OnClientDisconnect(int iClient)
 	Preferences_SetAll(iClient, -1);
 }
 
-public Action OnPlayerRunCmd(int iClient, int &iButtons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+public void TF2_OnConditionAdded(int iClient, TFCond cond)
 {
-	if (g_Player[iClient].IsGhost())
-	{
-		iButtons &= ~IN_USE;
-		return Plugin_Changed;
-	}
+	if (cond != TFCond_HalloweenGhostMode)
+		return;
 
-	return Plugin_Continue;
+	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
+
+	SetVariantString((TF2_GetClientTeam(iClient) == TFTeam_Red) ? GHOST_MODEL_RED : GHOST_MODEL_BLU);
+	AcceptEntityInput(iClient, "SetCustomModel");
+
+	SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_DEAD);
+	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
+	SetEntProp(iClient, Prop_Send, "m_bUseClassAnimations", false);
 }
 
-MRESReturn DHook_CTFPlayerShared_InCond_Post(Address pPlayerShared, DHookReturn ret, DHookParam params)
+public void TF2_OnConditionRemoved(int iClient, TFCond cond)
 {
-	static int m_Shared = -1;
-	if (m_Shared == -1)
-		m_Shared = FindSendPropInfo("CTFPlayer", "m_Shared");
+	if (cond != TFCond_HalloweenGhostMode)
+		return;
 
-	int iClient = SDK_GetBaseEntity(pPlayerShared - view_as<Address>(m_Shared));
-	if (iClient <= 0 || iClient > MaxClients)
-		return MRES_Ignored;
-
-	if (params.Get(1) == TFCond_HalloweenGhostMode && g_Player[iClient].IsGhost())
-	{
-		ret.Value = true;
-		return MRES_Supercede;
-	}
-
-	return MRES_Ignored;
+	SetVariantString("");
+	AcceptEntityInput(iClient, "SetCustomModel");
+	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
 }
 
 Action Hook_SetTransmit(int iClient, int iOther)
 {
-	if (!g_Player[iClient].IsGhost() || iOther == iClient)
+	if (!IsGhost(iClient) || iOther == iClient)
 		return Plugin_Continue;
 
 	// Transmit on round end
@@ -196,7 +134,7 @@ Action Hook_SetTransmit(int iClient, int iOther)
 		return Plugin_Continue;
 
 	// Don't transmit to alive players with disabled cookie
-	if (IsPlayerAlive(iOther) && !Preferences_Get(iOther, Preference_SeeGhost))
+	if (IsPlayerAlive(iOther) && !Preferences_Get(iOther, Preference_SeeGhosts))
 		return Plugin_Handled;
 
 	// Transmit to dead/ghost players
@@ -214,55 +152,30 @@ Action Command_Ghost(int iClient, int iArgc)
 
 Action CL_Voicemenu(int iClient, const char[] sCommand, int iArgc)
 {
-	if (!g_Player[iClient].IsGhost())
+	if (!IsGhost(iClient))
 		return Plugin_Continue;
 
-	Client_SetNextGhostTarget(iClient);
+	SetNextGhostTarget(iClient);
 	return Plugin_Handled;
 }
 
-Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
+Action CL_Boo(int iClient, const char[] sCommand, int iArgc)
 {
-	if (iArgc < 1 || !g_Player[iClient].IsGhost())
-		return Plugin_Continue;
-
-	char sClass[24];
-	GetCmdArg(1, sClass, sizeof(sClass));
-
-	if (StrEqual(sClass, "random", false) || StrEqual(sClass, "auto", false))
-	{
-		SetEntProp(iClient, Prop_Send, "m_iDesiredPlayerClass", GetRandomInt(1, 9));
-		return Plugin_Handled;
-	}
-
-	TFClassType class = TF2_GetClass(sClass);
-	if (class != TFClass_Unknown)
-		SetEntProp(iClient, Prop_Send, "m_iDesiredPlayerClass", view_as<int>(class));
-
-	return Plugin_Handled;
+	// 10% chance to play BOO!
+	return (GetURandomInt() % 10 == 0) ? Plugin_Continue : Plugin_Handled;
 }
 
-Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
-{
-	return g_Player[iClient].IsGhost() ? Plugin_Handled : Plugin_Continue;
-}
-
-void Event_PlayerState(Event hEvent, const char[] sName, bool bDontBroadcast)
+void Event_PlayerDeath(Event hEvent, const char[] sName, bool bDontBroadcast)
 {
 	int iClient = GetClientOfUserId(hEvent.GetInt("userid"));
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
+	if (iClient == 0 || IsFakeClient(iClient))
 		return;
 
-	if (StrEqual(sName[7], "death"))
-	{
-		GetClientAbsOrigin(iClient, g_Player[iClient].vecPos);
-		GetClientEyeAngles(iClient, g_Player[iClient].vecAng);
+	GetClientAbsOrigin(iClient, g_Player[iClient].vecPos);
+	GetClientEyeAngles(iClient, g_Player[iClient].vecAng);
 
-		if (Preferences_Get(iClient, Preference_BeGhost) && !(hEvent.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER))
-			CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
-	}
-	else
-		Client_SetGhostMode(iClient, g_Player[iClient].IsReady());
+	if (Preferences_Get(iClient, Preference_BeGhost) && !(hEvent.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER))
+		CreateTimer(0.1, Timer_BecomeGhost, GetClientUserId(iClient));
 }
 
 void Menu_DisplayMain(int iClient)
@@ -274,7 +187,7 @@ void Menu_DisplayMain(int iClient)
 	for (int i = 0; i < sizeof(g_sPreferenceNames); i++)
 	{
 		bool bEnabled = Preferences_Get(iClient, view_as<GhostPreference>(i));
-		Format(sDisplay, sizeof(sDisplay), "%T (%s)", g_sPreferenceNames[i], iClient, bEnabled ? "+" : "-");
+		Format(sDisplay, sizeof(sDisplay), "%T [%s]", g_sPreferenceNames[i], iClient, bEnabled ? "X" : " ");
 
 		IntToString(i, sInfo, sizeof(sInfo));
 		hMenu.AddItem(sInfo, sDisplay);
@@ -296,28 +209,18 @@ int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSelect)
 			bool bEnabled = !Preferences_Get(iClient, pref);
 			Preferences_Set(iClient, pref, bEnabled);
 
-			if (pref != Preference_BeGhost)
-				Menu_DisplayMain(iClient);
-
-			switch (pref)
+			if (pref == Preference_BeGhost)
 			{
-				case Preference_BeGhost:
+				if (bEnabled)
 				{
-					if (bEnabled)
-					{
-						Menu_DisplayMain(iClient);
-						if (!IsPlayerAlive(iClient))
-							CreateTimer(0.1, Timer_Respawn, GetClientUserId(iClient));
-					}
-					else
-						Client_CancelGhostMode(iClient);
+					if (!IsPlayerAlive(iClient))
+						CreateTimer(0.0, Timer_BecomeGhost, GetClientUserId(iClient));
 				}
-				case Preference_ThirdPerson:
-				{
-					if (g_Player[iClient].IsGhost())
-						SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", bEnabled ? 2 : 0);
-				}
+				else if (IsGhost(iClient))
+					CancelGhostMode(iClient);
 			}
+			else
+				Menu_DisplayMain(iClient);
 		}
 		case MenuAction_End: delete hMenu;
 	}
@@ -325,57 +228,34 @@ int Menu_SelectMain(Menu hMenu, MenuAction action, int iClient, int iSelect)
 	return 0;
 }
 
-void Client_CancelGhostMode(int iClient)
+void CancelGhostMode(int iClient)
 {
-	if (!g_Player[iClient].IsGhost())
-		return;
+	TF2_RemoveCondition(iClient, TFCond_HalloweenGhostMode);
 
-	Client_SetGhostMode(iClient, false);
-	SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_ALIVE);
-	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
-	SDKHooks_TakeDamage(iClient, 0, 0, GetEntProp(iClient, Prop_Send, "m_iHealth") * 1.0);
+	DataPack data;
+	CreateDataTimer(0.1, Timer_ResetTeam, data);
+	data.WriteCell(GetClientUserId(iClient));
+	data.WriteCell(TF2_GetClientTeam(iClient));
+
+	// This is used to enter observer state
+	TF2_ChangeClientTeam(iClient, TFTeam_Spectator);
 }
 
-void Client_SetGhostMode(int iClient, bool bState)
-{
-	g_Player[iClient].iTargetEnt = INVALID_ENT_REFERENCE;
-	g_Player[iClient].iState = bState ? State_Ghost : State_Ignore;
-	SetCollisions(iClient, bState);
-
-	if (bState)
-	{
-		SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_DEAD);
-		SetEntProp(iClient, Prop_Send, "m_iHideHUD", HIDEHUD_HEALTH);
-
-		SetGhostModel(iClient);
-		SetGhostColor(iClient);
-
-		TeleportEntity(iClient, g_Player[iClient].vecPos, g_Player[iClient].vecAng, NULL_VECTOR);
-		TE_Particle(iClient, GHOST_PARTICLE);
-
-		CreateTimer(0.1, Timer_PostGhostMode, GetClientUserId(iClient));
-		CreateTimer(0.1, Timer_CheckModel, GetClientUserId(iClient), TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-	}
-	else
-	{
-		SetVariantString(""); AcceptEntityInput(iClient, "SetCustomModel");
-		SetEntityRenderColor(iClient, 255, 255, 255, 255);
-	}
-}
-
-void Client_SetNextGhostTarget(int iClient)
+void SetNextGhostTarget(int iClient)
 {
 	int iLastTarget = EntRefToEntIndex(g_Player[iClient].iTargetEnt);
 	int iNextTarget = -1, iFirstTarget = -1;
 
 	TFTeam nTeam = TF2_GetClientTeam(iClient);
 
+	bool bArena = (GameRules_GetProp("m_nGameType") == TF_GAMETYPE_ARENA);
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (!IsClientInGame(i) || g_Player[i].IsGhost() || !IsPlayerAlive(i))
+		if (!IsClientInGame(i) || !IsPlayerAlive(i))
 			continue;
 
-		if (GameRules_GetProp("m_nGameType") != TF_GAMETYPE_ARENA && TF2_GetClientTeam(i) != nTeam)
+		// Deny targeting enemies in non-arena mode
+		if (!bArena && TF2_GetClientTeam(i) != nTeam)
 			continue;
 
 		if (iFirstTarget == -1)
@@ -388,8 +268,8 @@ void Client_SetNextGhostTarget(int iClient)
 		}
 	}
 
-	int iTarget = (0 < iNextTarget <= MaxClients && IsClientInGame(iNextTarget)) ? iNextTarget : iFirstTarget;
-	if (0 < iTarget <= MaxClients && IsClientInGame(iTarget))
+	int iTarget = (iNextTarget != -1) ? iNextTarget : iFirstTarget;
+	if (iTarget != -1)
 	{
 		g_Player[iClient].iTargetEnt = EntIndexToEntRef(iTarget);
 
@@ -401,74 +281,30 @@ void Client_SetNextGhostTarget(int iClient)
 	}
 }
 
-Action Timer_Respawn(Handle hTimer, int iUserid)
+Action Timer_BecomeGhost(Handle hTimer, int iUserid)
 {
 	int iClient = GetClientOfUserId(iUserid);
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient))
+	if (iClient == 0 || TF2_GetClientTeam(iClient) <= TFTeam_Spectator || !IsActiveRound())
 		return Plugin_Handled;
 
-	if (IsActiveRound() && TF2_GetClientTeam(iClient) >= TFTeam_Red && !IsFakeClient(iClient))
-	{
-		g_Player[iClient].iState = State_Ready;
-		TF2_RespawnPlayer(iClient);
-	}
-	else
-		g_Player[iClient].iState = State_Ignore;
+	TF2_RespawnPlayer(iClient);
 
+	TeleportEntity(iClient, g_Player[iClient].vecPos, g_Player[iClient].vecAng, NULL_VECTOR);
+	TE_Particle(GHOST_PARTICLE, g_Player[iClient].vecPos);
+
+	TF2_AddCondition(iClient, TFCond_HalloweenGhostMode);
 	return Plugin_Handled;
 }
 
-Action Timer_PostGhostMode(Handle hTimer, int iUserid)
+Action Timer_ResetTeam(Handle hTimer, DataPack data)
 {
-	int iClient = GetClientOfUserId(iUserid);
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
-		return Plugin_Handled;
+	data.Reset();
 
-	int iEntity = MaxClients + 1;
-	while ((iEntity = FindEntityByClassname(iEntity, "tf_wearable*")) > MaxClients)
-	{
-		if (GetEntPropEnt(iEntity, Prop_Send, "m_hOwnerEntity") == iClient)
-			TF2_RemoveWearable(iClient, iEntity);
-	}
-
-	iEntity = MaxClients + 1;
-	while ((iEntity = FindEntityByClassname(iEntity, "tf_powerup_bottle")) > MaxClients)
-	{
-		if (GetEntPropEnt(iEntity, Prop_Send, "m_hOwnerEntity") == iClient)
-			AcceptEntityInput(iEntity, "Kill");
-	}
-
-	iEntity = MaxClients + 1;
-	while ((iEntity = FindEntityByClassname(iEntity, "tf_weapon_spellbook")) > MaxClients)
-	{
-		if (GetEntPropEnt(iEntity, Prop_Send, "m_hOwnerEntity") == iClient)
-			AcceptEntityInput(iEntity, "Kill");
-	}
-
-	TF2_RemoveAllWeapons(iClient);
-
-	if (Preferences_Get(iClient, Preference_ThirdPerson))
-		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
+	int iClient = GetClientOfUserId(data.ReadCell());
+	if (iClient != 0)
+		TF2_ChangeClientTeam(iClient, data.ReadCell());
 
 	return Plugin_Handled;
-}
-
-Action Timer_CheckModel(Handle hTimer, int iUserid)
-{
-	int iClient = GetClientOfUserId(iUserid);
-	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || !g_Player[iClient].IsGhost())
-		return Plugin_Stop;
-
-	if (GetEntProp(iClient, Prop_Send, "m_nForceTauntCam") == 1)
-		SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
-
-	char sModel[PLATFORM_MAX_PATH];
-	GetEntPropString(iClient, Prop_Send, "m_iszCustomModel", sModel, sizeof(sModel));
-
-	if (!StrEqual(sModel, GHOST_MODEL_RED) && !StrEqual(sModel, GHOST_MODEL_BLU))
-		SetGhostModel(iClient);
-
-	return Plugin_Continue;
 }
 
 bool IsActiveRound()
@@ -507,14 +343,16 @@ void Preferences_SetAll(int iClient, int iPreferences)
 
 	// Disable see ghost cookie by default
 	if (iPreferences == 0)
-		g_Player[iClient].iPreferences |= RoundToNearest(Pow(2.0, float(view_as<int>(Preference_SeeGhost))));
+		g_Player[iClient].iPreferences |= RoundToNearest(Pow(2.0, float(view_as<int>(Preference_SeeGhosts))));
 }
 
 void Cookies_Refresh()
 {
 	for (int iClient = 1; iClient <= MaxClients; iClient++)
+	{
 		if (IsClientInGame(iClient) && !IsFakeClient(iClient))
 			Cookies_RefreshPreferences(iClient);
+	}
 }
 
 void Cookies_OnClientJoin(int iClient)
@@ -551,40 +389,21 @@ void Cookies_SavePreferences(int iClient, int iValue)
 	g_hCookiesPreferences.Set(iClient, sVal);
 }
 
-void TE_Particle(int iClient, const char[] sParticle)
+void TE_Particle(const char[] sParticle, float vecPos[3])
 {
 	static int iTable = INVALID_STRING_TABLE;
 	if (iTable == INVALID_STRING_TABLE)
 		iTable = FindStringTable("ParticleEffectNames");
 
 	TE_Start("TFParticleEffect");
-	TE_WriteNum("entindex", iClient);
 	TE_WriteNum("m_iParticleSystemIndex", FindStringIndex(iTable, sParticle));
+	TE_WriteFloat("m_vecOrigin[0]", vecPos[0]);
+	TE_WriteFloat("m_vecOrigin[1]", vecPos[1]);
+	TE_WriteFloat("m_vecOrigin[2]", vecPos[2]);
 	TE_SendToAll();
 }
 
-void SetGhostModel(int iClient)
+bool IsGhost(int iClient)
 {
-	SetVariantString((TF2_GetClientTeam(iClient) == TFTeam_Red) ? GHOST_MODEL_RED : GHOST_MODEL_BLU);
-	AcceptEntityInput(iClient, "SetCustomModel");
-}
-
-void SetGhostColor(int iClient)
-{
-	int iColor[4]; iColor = (TF2_GetClientTeam(iClient) == TFTeam_Red) ? GHOST_COLOR_RED : GHOST_COLOR_BLU;
-	SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
-}
-
-void SetCollisions(int iClient, bool bInGhostMode)
-{
-	SetEntProp(iClient, Prop_Send, "m_nSolidType", bInGhostMode ? SOLID_NONE : SOLID_BBOX);
-	SetEntProp(iClient, Prop_Send, "m_usSolidFlags", bInGhostMode ? FSOLID_NOT_SOLID : FSOLID_NOT_STANDABLE);
-
-	SetEntityCollisionGroup(iClient, bInGhostMode ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_PLAYER);
-	EntityCollisionRulesChanged(iClient);
-}
-
-int SDK_GetBaseEntity(Address pEntity)
-{
-	return SDKCall(g_hSDKGetBaseEntity, pEntity);
+	return TF2_IsPlayerInCondition(iClient, TFCond_HalloweenGhostMode);
 }
