@@ -45,7 +45,7 @@ public Plugin myinfo =
 {
 	name = "[TF2] Ghost Mode",
 	author = "Jughead",
-	version = "2.0.0",
+	version = "2.0.1",
 	url = "https://steamcommunity.com/profiles/76561198241665788"
 };
 
@@ -57,6 +57,10 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_ghostmode", Command_Ghost, "Open ghostmode preferences menu");
 
 	AddCommandListener(CL_Voicemenu, "voicemenu");
+	AddCommandListener(CL_Joinclass, "joinclass");
+	AddCommandListener(CL_Jointeam, "jointeam");
+	AddCommandListener(CL_Jointeam, "spectate");
+	AddCommandListener(CL_Jointeam, "autoteam");
 	AddCommandListener(CL_Boo, "boo");
 
 	HookEvent("player_death", Event_PlayerDeath);
@@ -157,6 +161,59 @@ Action CL_Voicemenu(int iClient, const char[] sCommand, int iArgc)
 
 	SetNextGhostTarget(iClient);
 	return Plugin_Handled;
+}
+
+Action CL_Joinclass(int iClient, const char[] sCommand, int iArgc)
+{
+	if (iArgc < 1 || !IsGhost(iClient))
+		return Plugin_Continue;
+
+	char sClass[24];
+	GetCmdArg(1, sClass, sizeof(sClass));
+
+	if (strcmp(sClass, "random", false) == 0 || strcmp(sClass, "auto", false) == 0)
+	{
+		SetEntProp(iClient, Prop_Send, "m_iDesiredPlayerClass", GetRandomInt(1, 9));
+		return Plugin_Handled;
+	}
+
+	TFClassType class = TF2_GetClass(sClass);
+	if (class != TFClass_Unknown)
+		SetEntProp(iClient, Prop_Send, "m_iDesiredPlayerClass", view_as<int>(class));
+
+	return Plugin_Handled;
+}
+
+Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
+{
+	if (!IsGhost(iClient))
+		return Plugin_Continue;
+
+	if (strcmp(sCommand, "autoteam", false) == 0)
+		return Plugin_Handled;
+
+	TFTeam nTeam = TFTeam_Unassigned;
+
+	char sTeam[32];
+	GetCmdArg(1, sTeam, sizeof(sTeam));
+
+	if (strcmp(sCommand, "spectate", false) == 0 || iArgc && StrContains(sTeam, "spectate", false) == 0)
+		nTeam = TFTeam_Spectator;
+	else if (strcmp(sTeam, "red", false) == 0)
+		nTeam = TFTeam_Red;
+	else if (strcmp(sTeam, "blue", false) == 0)
+		nTeam = TFTeam_Blue;
+
+	TFTeam currTeam = TF2_GetClientTeam(iClient);
+	if (nTeam != TFTeam_Unassigned && currTeam != nTeam && !TeamsWouldBeUnbalanced(iClient, nTeam))
+	{
+		if (nTeam > TFTeam_Spectator)
+			SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_ALIVE);
+
+		TF2_RemoveCondition(iClient, TFCond_HalloweenGhostMode);
+	}
+
+	return Plugin_Continue;
 }
 
 Action CL_Boo(int iClient, const char[] sCommand, int iArgc)
@@ -406,4 +463,28 @@ void TE_Particle(const char[] sParticle, float vecPos[3])
 bool IsGhost(int iClient)
 {
 	return TF2_IsPlayerInCondition(iClient, TFCond_HalloweenGhostMode);
+}
+
+bool TeamsWouldBeUnbalanced(int client, TFTeam newTeam)
+{
+	static ConVar mp_teams_unbalance_limit;
+	if (!mp_teams_unbalance_limit)
+		mp_teams_unbalance_limit = FindConVar("mp_teams_unbalance_limit");
+
+	if (newTeam == TFTeam_Spectator || mp_teams_unbalance_limit.IntValue <= 0)
+		return false;
+
+	int iCount[view_as<int>(TFTeam_Blue) + 1];
+	iCount[newTeam]++;
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || i == client)
+			continue;
+
+		iCount[TF2_GetClientTeam(i)]++;
+	}
+
+	int iDifference = (newTeam == TFTeam_Red) ? iCount[TFTeam_Red] - iCount[TFTeam_Blue] : iCount[TFTeam_Blue] - iCount[TFTeam_Red];
+	return iDifference > mp_teams_unbalance_limit.IntValue;
 }
