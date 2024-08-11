@@ -16,6 +16,17 @@
 
 #define GHOST_PARTICLE "ghost_appearation"
 
+#define OBS_MODE_CHASE 5
+
+char g_sPlayerCondProp[][] =
+{
+	"m_nPlayerCond",
+	"m_nPlayerCondEx",
+	"m_nPlayerCondEx2",
+	"m_nPlayerCondEx3",
+	"m_nPlayerCondEx4",
+};
+
 enum struct Player
 {
 	int iTargetEnt;
@@ -189,30 +200,13 @@ Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
 	if (!IsGhost(iClient))
 		return Plugin_Continue;
 
-	if (strcmp(sCommand, "autoteam", false) == 0)
-		return Plugin_Handled;
+	DataPack data = new DataPack();
+	data.WriteCell(GetClientUserId(iClient));
+	data.WriteCell(GetClientTeam(iClient));
+	RequestFrame(Frame_CheckTeam, data);
 
-	TFTeam nTeam = TFTeam_Unassigned;
-
-	char sTeam[32];
-	GetCmdArg(1, sTeam, sizeof(sTeam));
-
-	if (strcmp(sCommand, "spectate", false) == 0 || iArgc && StrContains(sTeam, "spectate", false) == 0)
-		nTeam = TFTeam_Spectator;
-	else if (strcmp(sTeam, "red", false) == 0)
-		nTeam = TFTeam_Red;
-	else if (strcmp(sTeam, "blue", false) == 0)
-		nTeam = TFTeam_Blue;
-
-	TFTeam currTeam = TF2_GetClientTeam(iClient);
-	if (nTeam != TFTeam_Unassigned && currTeam != nTeam && !TeamsWouldBeUnbalanced(iClient, nTeam))
-	{
-		if (nTeam > TFTeam_Spectator)
-			SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_ALIVE);
-
-		TF2_RemoveCondition(iClient, TFCond_HalloweenGhostMode);
-	}
-
+	// Bypass CTFPlayer::ChangeTeam check
+	TF2_RemoveConditionFake(iClient, TFCond_HalloweenGhostMode);
 	return Plugin_Continue;
 }
 
@@ -289,13 +283,12 @@ void CancelGhostMode(int iClient)
 {
 	TF2_RemoveCondition(iClient, TFCond_HalloweenGhostMode);
 
-	DataPack data;
-	CreateDataTimer(0.1, Timer_ResetTeam, data);
-	data.WriteCell(GetClientUserId(iClient));
-	data.WriteCell(TF2_GetClientTeam(iClient));
-
-	// This is used to enter observer state
-	TF2_ChangeClientTeam(iClient, TFTeam_Spectator);
+	// Enter observing state
+	SetEntProp(iClient, Prop_Data, "m_iObserverLastMode", OBS_MODE_CHASE);
+	int iTeamNum = GetClientTeam(iClient);
+	SetEntProp(iClient, Prop_Send, "m_iTeamNum", 1);
+	DispatchSpawn(iClient);
+	SetEntProp(iClient, Prop_Send, "m_iTeamNum", iTeamNum);
 }
 
 void SetNextGhostTarget(int iClient)
@@ -353,15 +346,14 @@ Action Timer_BecomeGhost(Handle hTimer, int iUserid)
 	return Plugin_Handled;
 }
 
-Action Timer_ResetTeam(Handle hTimer, DataPack data)
+void Frame_CheckTeam(DataPack data)
 {
 	data.Reset();
-
 	int iClient = GetClientOfUserId(data.ReadCell());
-	if (iClient != 0)
-		TF2_ChangeClientTeam(iClient, data.ReadCell());
+	if (iClient != 0 && GetClientTeam(iClient) == data.ReadCell())	// Client didn't change team
+		TF2_AddConditionFake(iClient, TFCond_HalloweenGhostMode);
 
-	return Plugin_Handled;
+	delete data;
 }
 
 bool IsActiveRound()
@@ -460,31 +452,27 @@ void TE_Particle(const char[] sParticle, float vecPos[3])
 	TE_SendToAll();
 }
 
+// Thanks to FortyTwoFortyTwo for these stocks
+void TF2_AddConditionFake(int iClient, TFCond nCond)
+{
+	int iCond = view_as<int>(nCond);
+	int iArray = iCond / 32;
+	int iBit = (1 << (iCond - (iArray * 32)));
+	SetEntProp(iClient, Prop_Send, g_sPlayerCondProp[iArray], GetEntProp(iClient, Prop_Send, g_sPlayerCondProp[iArray]) | iBit);
+}
+
+void TF2_RemoveConditionFake(int iClient, TFCond nCond)
+{
+	int iCond = view_as<int>(nCond);
+	int iArray = iCond / 32;
+	int iBit = (1 << (iCond - (iArray * 32)));
+	SetEntProp(iClient, Prop_Send, g_sPlayerCondProp[iArray], GetEntProp(iClient, Prop_Send, g_sPlayerCondProp[iArray]) & ~iBit);
+	
+	if (iArray == 0)	// Thanks legacy TF2
+		SetEntProp(iClient, Prop_Send, "_condition_bits", GetEntProp(iClient, Prop_Send, "_condition_bits") & ~iBit);
+}
+
 bool IsGhost(int iClient)
 {
 	return TF2_IsPlayerInCondition(iClient, TFCond_HalloweenGhostMode);
-}
-
-bool TeamsWouldBeUnbalanced(int client, TFTeam newTeam)
-{
-	static ConVar mp_teams_unbalance_limit;
-	if (!mp_teams_unbalance_limit)
-		mp_teams_unbalance_limit = FindConVar("mp_teams_unbalance_limit");
-
-	if (newTeam == TFTeam_Spectator || mp_teams_unbalance_limit.IntValue <= 0)
-		return false;
-
-	int iCount[view_as<int>(TFTeam_Blue) + 1];
-	iCount[newTeam]++;
-
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (!IsClientInGame(i) || i == client)
-			continue;
-
-		iCount[TF2_GetClientTeam(i)]++;
-	}
-
-	int iDifference = (newTeam == TFTeam_Red) ? iCount[TFTeam_Red] - iCount[TFTeam_Blue] : iCount[TFTeam_Blue] - iCount[TFTeam_Red];
-	return iDifference > mp_teams_unbalance_limit.IntValue;
 }
