@@ -80,11 +80,11 @@ public void OnPluginStart()
 
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsClientConnected(i))
-			OnClientConnected(i);
-
 		if (IsClientInGame(i))
 			OnClientPutInServer(i);
+
+		if (AreClientCookiesCached(i))
+			OnClientCookiesCached(i);
 	}
 }
 
@@ -98,14 +98,14 @@ public void OnMapStart()
 	Cookies_Refresh();
 }
 
-public void OnClientConnected(int iClient)
-{
-	Preferences_SetAll(iClient, -1);
-}
-
 public void OnClientPutInServer(int iClient)
 {
+	Preferences_SetAll(iClient, -1);
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
+}
+
+public void OnClientCookiesCached(int iClient)
+{
 	Cookies_OnClientJoin(iClient);
 }
 
