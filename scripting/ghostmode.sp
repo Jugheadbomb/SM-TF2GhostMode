@@ -18,6 +18,9 @@
 
 #define OBS_MODE_CHASE 5
 
+#define GHOST_COLOR_RED { 159, 55, 34, 255 }
+#define GHOST_COLOR_BLU { 76, 109, 129, 255 }
+
 char g_sPlayerCondProp[][] =
 {
 	"m_nPlayerCond",
@@ -62,7 +65,7 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
-	g_hCookiesPreferences = new Cookie("ghostmode_preferences", "Ghost mode player preferences", CookieAccess_Protected);
+	g_hCookiesPreferences = new Cookie("ghostmode_preference", "Ghost mode player preferences", CookieAccess_Protected);
 
 	RegConsoleCmd("sm_ghost", Command_Ghost, "Open ghostmode preferences menu");
 	RegConsoleCmd("sm_ghostmode", Command_Ghost, "Open ghostmode preferences menu");
@@ -81,10 +84,13 @@ public void OnPluginStart()
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		if (IsClientInGame(i))
+		{
+			OnClientConnected(i);
 			OnClientPutInServer(i);
 
-		if (AreClientCookiesCached(i))
-			OnClientCookiesCached(i);
+			if (AreClientCookiesCached(i))
+				OnClientCookiesCached(i);
+		}
 	}
 }
 
@@ -98,9 +104,13 @@ public void OnMapStart()
 	Cookies_Refresh();
 }
 
-public void OnClientPutInServer(int iClient)
+public void OnClientConnected(int iClient)
 {
 	Preferences_SetAll(iClient, -1);
+}
+
+public void OnClientPutInServer(int iClient)
+{
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 }
 
@@ -127,6 +137,9 @@ public void TF2_OnConditionAdded(int iClient, TFCond cond)
 	SetEntProp(iClient, Prop_Send, "m_lifeState", LIFE_DEAD);
 	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 2);
 	SetEntProp(iClient, Prop_Send, "m_bUseClassAnimations", false);
+
+	int iColor[4]; iColor = (TF2_GetClientTeam(iClient) == TFTeam_Red) ? GHOST_COLOR_RED : GHOST_COLOR_BLU;
+	SetEntityRenderColor(iClient, iColor[0], iColor[1], iColor[2], iColor[3]);
 }
 
 public void TF2_OnConditionRemoved(int iClient, TFCond cond)
@@ -137,6 +150,7 @@ public void TF2_OnConditionRemoved(int iClient, TFCond cond)
 	SetVariantString("");
 	AcceptEntityInput(iClient, "SetCustomModel");
 	SetEntProp(iClient, Prop_Send, "m_nForceTauntCam", 0);
+	SetEntityRenderColor(iClient, 255, 255, 255, 255);
 }
 
 Action Hook_SetTransmit(int iClient, int iOther)
@@ -212,8 +226,14 @@ Action CL_Jointeam(int iClient, const char[] sCommand, int iArgc)
 
 Action CL_Boo(int iClient, const char[] sCommand, int iArgc)
 {
-	// 10% chance to play BOO!
-	return (GetURandomInt() % 10 == 0) ? Plugin_Continue : Plugin_Handled;
+	static float flNextUseTime[MAXPLAYERS];
+
+	// 10 sec cooldown
+	if (flNextUseTime[iClient] > GetGameTime())
+		return Plugin_Handled;
+	
+	flNextUseTime[iClient] = GetGameTime() + 10.0;
+	return Plugin_Continue;
 }
 
 void Event_PlayerDeath(Event hEvent, const char[] sName, bool bDontBroadcast)
