@@ -8,12 +8,31 @@
 
 	"Menu_BeGhost"
 	{
-		"en"	"Be ghost"
-		"ru"	"Быть призраком"
+		"en"	"Ghost after death"
+		"ru"	"Призрак после смерти"
 	}
+
 	"Menu_SeeGhost"
 	{
-		"en"	"See ghosts (when alive)"
-		"ru"	"Видеть призраков (когда живой)"
+		"en"	"See ghosts alive"
+		"ru"	"Видеть призраков"
+	}
+
+	"Menu_ThirdPerson"
+	{
+		"en"	"Third person"
+		"ru"	"Вид от 3-го лица"
+	}
+
+	"Chat_GhostPending"
+	{
+		"en"	"Becoming a ghost..."
+		"ru"	"Становишься призраком..."
+	}
+
+	"Chat_GhostActive"
+	{
+		"en"	"You are a ghost. Medic call teleports."
+		"ru"	"Ты призрак. Вызов медика телепортирует."
 	}
 }
